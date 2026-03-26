@@ -38,6 +38,12 @@ Workflow: [`.github/workflows/build-odh-operator-catalog.yml`](.github/workflows
 |--------|------|
 | `QUAY_CATALOG_REPO` | Catalog index image path **without** tag (e.g. `quay.io/myorg/odh-catalog-index`). If unset, the catalog is pushed to `${QUAY_REPO}-catalog:v$VERSION`. |
 | `KUBECONFIG` | Raw kubeconfig file contents, only if you run **workflow dispatch** with **Deploy bundle** enabled |
+| `MAAS_MANIFEST_REF` | If set (e.g. `main`), overrides the **maas** component in [get_all_manifests.sh](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) via `--maas=org:repo:ref:path` (same mechanism upstream documents for `--component=value`). Empty = keep the operator repo’s pinned revision. |
+| `MAAS_MANIFEST_PIN_LATEST` | Set to `1` or `true` with `MAAS_MANIFEST_REF=main` to resolve `main@<current_sha>` for a reproducible build. |
+| `MAAS_MANIFEST_REPO` | Optional; GitHub repo name (default `maas-billing`). Use another name (e.g. a fork) if your manifests live elsewhere. |
+| `MAAS_MANIFEST_ORG` | Optional (default `opendatahub-io`). |
+| `MAAS_MANIFEST_SOURCE_PATH` | Optional (default `deployment`). |
+| `MAAS_MANIFEST_WRITE_FILE` | Set to `1` to rewrite every `["maas"]=...` line in the cloned `get_all_manifests.sh` to match the override (optional visibility only). |
 
 ### Manual run inputs (workflow dispatch)
 
@@ -51,6 +57,14 @@ Leave any field empty to keep using the matching repository secret.
 | `version` | OLM bundle/catalog `VERSION` (empty = upstream Makefile default) |
 | `git_ref` | Upstream branch, tag, or commit (default `main`) |
 | `deploy_bundle` | After push, run `operator-sdk run bundle` (needs `KUBECONFIG`) |
+| `maas_manifest_ref` | Overrides `MAAS_MANIFEST_REF` for that run |
+| `maas_manifest_pin_latest` | Pin `main` to the current commit (`main@sha`) |
+| `maas_manifest_repo` / `maas_manifest_org` / `maas_manifest_source_path` | Override the matching secrets for that run |
+| `maas_manifest_write_file` | Same as secret `MAAS_MANIFEST_WRITE_FILE` |
+
+### Optional MaaS (Models-as-a-Service) manifest source
+
+The operator pulls **maas** manifests from GitHub (by default [maas-billing](https://github.com/opendatahub-io/maas-billing) under `deployment/`). To track **`main`** or the **latest commit on `main`** instead of the operator’s baked-in pin, set **`MAAS_MANIFEST_REF=main`**. Add **`MAAS_MANIFEST_PIN_LATEST=1`** to use the `main@<sha>` form the upstream script supports. To use a different repository name (for example another fork), set **`MAAS_MANIFEST_REPO`**. **`ODH_PLATFORM_TYPE=rhoai`** is supported when you need the RHOAI manifest map before the same `--maas=` override.
 
 ### Where to find the image references
 
@@ -75,7 +89,7 @@ export OPERATOR_GIT_REF=main             # optional upstream ref
 cat build-output.env
 ```
 
-The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `CATALOG_REPO`, and `VERSION`. It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
+The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), and `VERSION`. It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
 
 ### Container commands
 

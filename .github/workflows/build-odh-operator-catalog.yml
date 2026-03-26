@@ -9,6 +9,11 @@
 #     If unset, catalog is pushed to ${QUAY_REPO}-catalog:v$VERSION (upstream default).
 #   QUAY_TAG — Default tag for the operator image (e.g. latest or a CI tag)
 #
+# Optional MaaS (maas-billing / models-as-a-service) manifest override:
+#   MAAS_MANIFEST_REF — e.g. main (see script). Empty = use upstream pin in get_all_manifests.sh
+#   MAAS_MANIFEST_PIN_LATEST — 1/true with MAAS_MANIFEST_REF=main to use main@<sha>
+#   MAAS_MANIFEST_REPO — optional; default maas-billing (set if you use another repo name)
+#
 # Optional bundle deploy (advanced):
 #   - Set workflow input deploy_bundle to true
 #   - Add repository secret KUBECONFIG with the raw kubeconfig file contents
@@ -49,6 +54,36 @@ on:
         type: string
       deploy_bundle:
         description: "Run operator-sdk run bundle after push (needs kubeconfig secret)"
+        required: false
+        default: false
+        type: boolean
+      maas_manifest_ref:
+        description: "Override maas manifests ref (empty = secret MAAS_MANIFEST_REF or upstream default)"
+        required: false
+        default: ""
+        type: string
+      maas_manifest_pin_latest:
+        description: "Pin main to current commit (main@sha); needs MAAS_MANIFEST_REF=main"
+        required: false
+        default: false
+        type: boolean
+      maas_manifest_repo:
+        description: "GitHub repo name for maas manifests (empty = secret MAAS_MANIFEST_REPO or maas-billing)"
+        required: false
+        default: ""
+        type: string
+      maas_manifest_org:
+        description: "GitHub org (empty = secret MAAS_MANIFEST_ORG or opendatahub-io)"
+        required: false
+        default: ""
+        type: string
+      maas_manifest_source_path:
+        description: "Path inside repo (empty = secret MAAS_MANIFEST_SOURCE_PATH or deployment)"
+        required: false
+        default: ""
+        type: string
+      maas_manifest_write_file:
+        description: "Rewrite [\"maas\"] lines in cloned get_all_manifests.sh (debug/visibility)"
         required: false
         default: false
         type: boolean
@@ -109,6 +144,12 @@ jobs:
           QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
           DEPLOY_BUNDLE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_bundle == true && '1' || '0' }}
           BUILD_OUTPUT_ENV: ${{ github.workspace }}/build-output.env
+          MAAS_MANIFEST_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_ref != '' && inputs.maas_manifest_ref || secrets.MAAS_MANIFEST_REF }}
+          MAAS_MANIFEST_PIN_LATEST: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_pin_latest == true && '1' || secrets.MAAS_MANIFEST_PIN_LATEST }}
+          MAAS_MANIFEST_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo != '' && inputs.maas_manifest_repo || secrets.MAAS_MANIFEST_REPO }}
+          MAAS_MANIFEST_ORG: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_org != '' && inputs.maas_manifest_org || secrets.MAAS_MANIFEST_ORG }}
+          MAAS_MANIFEST_SOURCE_PATH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_source_path != '' && inputs.maas_manifest_source_path || secrets.MAAS_MANIFEST_SOURCE_PATH }}
+          MAAS_MANIFEST_WRITE_FILE: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_write_file == true && '1' || secrets.MAAS_MANIFEST_WRITE_FILE }}
         run: ./scripts/build-and-push-odh-operator.sh
 
       - name: Export job outputs (where the build is)

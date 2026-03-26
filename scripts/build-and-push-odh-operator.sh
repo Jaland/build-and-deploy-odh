@@ -25,6 +25,16 @@
 #   IMAGE_BUILDER     podman or docker (default: podman)
 #   BUILD_OUTPUT_ENV  Path for KEY=value summary (default: <repo>/build-output.env)
 #
+# Optional MaaS / models-as-a-service manifests (upstream get_all_manifests.sh supports --maas=...):
+#   MAAS_MANIFEST_REF   If set, override the maas component (e.g. main, rhoai-3.4, or main@<sha>).
+#                       Use main for the branch tip; see MAAS_MANIFEST_PIN_LATEST for pinning.
+#   MAAS_MANIFEST_PIN_LATEST  If 1/true and MAAS_MANIFEST_REF is main, resolve to main@<current_sha>.
+#   MAAS_MANIFEST_ORG   GitHub org (default: opendatahub-io)
+#   MAAS_MANIFEST_REPO  Repo name (default: maas-billing; use models-as-a-service or another fork if needed)
+#   MAAS_MANIFEST_SOURCE_PATH  Path inside repo (default: deployment)
+#   ODH_PLATFORM_TYPE   OpenDataHub (default) or rhoai — selects which base manifest map is used before override
+#   MAAS_MANIFEST_WRITE_FILE  If 1, rewrite the ["maas"]= line in get_all_manifests.sh to match the override
+#
 set -euo pipefail
 
 IMG_TAG="${IMG_TAG:-latest}"
@@ -66,6 +76,8 @@ fi
 
 cd "$CLONE_DIR"
 
+maas_override=""
+
 # Log in once per registry host (operator/bundle and optional catalog may use different repos or hosts).
 login_registry_hosts() {
   local host
@@ -79,14 +91,69 @@ login_registry_hosts "${IMAGE_TAG_BASE}" "${CATALOG_REPO:-}"
 
 export IMAGE_BUILDER
 
-MAKE_ARGS=(IMAGE_TAG_BASE="${IMAGE_TAG_BASE}" IMG_TAG="${IMG_TAG}")
+export ODH_PLATFORM_TYPE="${ODH_PLATFORM_TYPE:-OpenDataHub}"
+MAKE_ARGS=(IMAGE_TAG_BASE="${IMAGE_TAG_BASE}" IMG_TAG="${IMG_TAG}" ODH_PLATFORM_TYPE="${ODH_PLATFORM_TYPE}")
 if [[ -n "${VERSION:-}" ]]; then
   MAKE_ARGS+=(VERSION="${VERSION}")
 fi
 
+# Upstream: https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh
+# Optional --maas=org:repo:ref:path overrides the pinned maas-billing (or other) revision without editing the file.
+resolve_branch_head_sha() {
+  local org="$1" repo="$2" branch="$3"
+  git ls-remote "https://github.com/${org}/${repo}.git" "refs/heads/${branch}" 2>/dev/null | awk '{print $1}'
+}
+
+build_maas_manifest_override() {
+  local org="${MAAS_MANIFEST_ORG:-opendatahub-io}"
+  local repo="${MAAS_MANIFEST_REPO:-maas-billing}"
+  local path="${MAAS_MANIFEST_SOURCE_PATH:-deployment}"
+  local ref="${MAAS_MANIFEST_REF:-}"
+  [[ -n "${ref}" ]] || return 1
+  if [[ "${MAAS_MANIFEST_PIN_LATEST:-}" == "1" || "${MAAS_MANIFEST_PIN_LATEST:-}" == "true" ]]; then
+    if [[ "${ref}" != "main" ]]; then
+      echo "ERROR: MAAS_MANIFEST_PIN_LATEST requires MAAS_MANIFEST_REF=main" >&2
+      exit 1
+    fi
+    local sha
+    sha="$(resolve_branch_head_sha "${org}" "${repo}" "main")"
+    if [[ -z "${sha}" ]]; then
+      echo "ERROR: could not resolve latest commit for https://github.com/${org}/${repo} branch main" >&2
+      exit 1
+    fi
+    echo "${ref}@${sha}"
+  else
+    echo "${ref}"
+  fi
+}
+
+maybe_patch_get_all_manifests_file() {
+  local override="$1"
+  if [[ "${MAAS_MANIFEST_WRITE_FILE:-}" != "1" && "${MAAS_MANIFEST_WRITE_FILE:-}" != "true" ]]; then
+    return 0
+  fi
+  local f="get_all_manifests.sh"
+  [[ -f "${f}" ]] || return 0
+  echo "Rewriting [\"maas\"] lines in ${f} (MAAS_MANIFEST_WRITE_FILE=1)..."
+  # ODH and RHOAI blocks both define ["maas"]; replace the value inside the quotes.
+  MAAS_OVERRIDE="$override" perl -i -pe 's/^(\s*\["maas"\]=")[^"]+/$1$ENV{MAAS_OVERRIDE}/' "${f}"
+}
+
 if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
-  echo "Fetching component manifests (make get-manifests)..."
-  make "${MAKE_ARGS[@]}" get-manifests
+  echo "Fetching component manifests (get_all_manifests.sh)..."
+  if [[ -n "${MAAS_MANIFEST_REF:-}" ]]; then
+    ref_resolved="$(build_maas_manifest_override)"
+    org="${MAAS_MANIFEST_ORG:-opendatahub-io}"
+    repo="${MAAS_MANIFEST_REPO:-maas-billing}"
+    path="${MAAS_MANIFEST_SOURCE_PATH:-deployment}"
+    maas_override="${org}:${repo}:${ref_resolved}:${path}"
+    echo "MaaS manifest override: --maas=${maas_override}"
+    maybe_patch_get_all_manifests_file "${maas_override}"
+  fi
+  VERSION_FOR_MANIFESTS="$(make "${MAKE_ARGS[@]}" -s print-VERSION 2>/dev/null || true)"
+  ga_args=()
+  [[ -n "${maas_override}" ]] && ga_args+=(--maas="${maas_override}")
+  ODH_PLATFORM_TYPE="${ODH_PLATFORM_TYPE}" VERSION="${VERSION_FOR_MANIFESTS}" ./get_all_manifests.sh "${ga_args[@]}"
 else
   echo "Skipping get-manifests"
 fi
@@ -116,6 +183,7 @@ BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:v${VERSION_RESOLVED}"
   echo "CATALOG_IMAGE=${CATALOG_IMG}"
   echo "IMAGE_TAG_BASE=${IMAGE_TAG_BASE}"
   echo "CATALOG_REPO=${CATALOG_REPO:-}"
+  echo "MAAS_OVERRIDE=${maas_override:-}"
   echo "IMG_TAG=${IMG_TAG}"
   echo "VERSION=${VERSION_RESOLVED}"
 } | tee "$BUILD_OUTPUT_ENV"
