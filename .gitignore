@@ -1,0 +1,5 @@
+# Cloned upstream operator (script default)
+/opendatahub-operator/
+
+# CI summary written by scripts/build-and-push-odh-operator.sh
+/build-output.env
