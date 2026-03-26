@@ -177,6 +177,9 @@ make "${MAKE_ARGS[@]}" CATALOG_IMG="${CATALOG_IMG}" catalog-build catalog-push
 OPERATOR_IMG="${IMAGE_TAG_BASE}:${IMG_TAG}"
 BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:v${VERSION_RESOLVED}"
 
+# Models-as-a-Service: https://github.com/opendatahub-io/maas-billing/blob/main/scripts/deploy.sh
+MAAS_DEPLOY_COMMAND="./scripts/deploy.sh --operator-catalog ${CATALOG_IMG} --operator-image ${OPERATOR_IMG}"
+
 {
   echo "OPERATOR_IMAGE=${OPERATOR_IMG}"
   echo "BUNDLE_IMAGE=${BUNDLE_IMG}"
@@ -186,6 +189,7 @@ BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:v${VERSION_RESOLVED}"
   echo "MAAS_OVERRIDE=${maas_override:-}"
   echo "IMG_TAG=${IMG_TAG}"
   echo "VERSION=${VERSION_RESOLVED}"
+  echo "MAAS_DEPLOY_COMMAND=${MAAS_DEPLOY_COMMAND}"
 } | tee "$BUILD_OUTPUT_ENV"
 
 echo ""
@@ -194,6 +198,10 @@ echo "Operator image: ${OPERATOR_IMG}"
 echo "Bundle image:   ${BUNDLE_IMG}"
 echo "Catalog image:  ${CATALOG_IMG}"
 echo "===================================="
+echo ""
+echo "MaaS / Models-as-a-Service deploy (from a maas-billing clone):"
+echo "  ${MAAS_DEPLOY_COMMAND}"
+echo "Docs: https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/"
 
 if [[ "${DEPLOY_BUNDLE}" == "1" ]]; then
   echo "Deploying bundle to cluster (operator-sdk run bundle)..."

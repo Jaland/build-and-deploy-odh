@@ -100,6 +100,7 @@ jobs:
       bundle_image: ${{ steps.export.outputs.bundle_image }}
       catalog_image: ${{ steps.export.outputs.catalog_image }}
       version: ${{ steps.export.outputs.version }}
+      maas_deploy_command: ${{ steps.export.outputs.maas_deploy_command }}
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
@@ -163,6 +164,7 @@ jobs:
             echo "bundle_image=${BUNDLE_IMAGE}"
             echo "catalog_image=${CATALOG_IMAGE}"
             echo "version=${VERSION}"
+            echo "maas_deploy_command=${MAAS_DEPLOY_COMMAND}"
           } >> "$GITHUB_OUTPUT"
           echo "### Built images" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -170,7 +172,15 @@ jobs:
           echo "**Bundle:** \`${BUNDLE_IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Catalog:** \`${CATALOG_IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "These values are also available as job outputs: \`operator_image\`, \`bundle_image\`, \`catalog_image\`, \`version\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "Job outputs: \`operator_image\`, \`bundle_image\`, \`catalog_image\`, \`version\`, \`maas_deploy_command\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Models-as-a-Service (MaaS) deploy" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "These images are built for the Open Data Hub operator (including the **maas** component). To install MaaS on a cluster using your operator and catalog images, clone [opendatahub-io/maas-billing](https://github.com/opendatahub-io/maas-billing) and run \`scripts/deploy.sh\` with the catalog and operator image references. See [Models-as-a-Service install](https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/) for details." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo "${MAAS_DEPLOY_COMMAND}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build metadata
         uses: actions/upload-artifact@v4

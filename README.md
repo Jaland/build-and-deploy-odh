@@ -70,9 +70,19 @@ The operator pulls **maas** manifests from GitHub (by default [maas-billing](htt
 
 After a successful run:
 
-- **Job summary** on the workflow run lists operator, bundle, and catalog image URLs.
-- **Job outputs:** `operator_image`, `bundle_image`, `catalog_image`, `version`.
-- **Artifact:** `build-output-env` (same key/value pairs as `build-output.env`).
+- **Job summary** on the workflow run lists operator, bundle, and catalog image URLs, plus a **Models-as-a-Service deploy** section with the exact `./scripts/deploy.sh` command (same as below).
+- **Job outputs:** `operator_image`, `bundle_image`, `catalog_image`, `version`, `maas_deploy_command`.
+- **Artifact:** `build-output-env` (same key/value pairs as `build-output.env`, including `MAAS_DEPLOY_COMMAND`).
+
+### Deploy MaaS with your operator images ([Models-as-a-Service](https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/))
+
+The [maas-billing](https://github.com/opendatahub-io/maas-billing) repository ships `scripts/deploy.sh`, which accepts a custom operator catalog image and operator image (see `--operator-catalog` and `--operator-image` in that script). After cloning that repo, run from the repository root:
+
+```bash
+./scripts/deploy.sh --operator-catalog '<CATALOG_IMAGE>' --operator-image '<OPERATOR_IMAGE>'
+```
+
+Replace the placeholders with the `CATALOG_IMAGE` and `OPERATOR_IMAGE` values from this workflow’s summary, job outputs, or `build-output.env`. The build script prints the same one-liner at the end of a successful local run.
 
 ## Local build (script)
 
