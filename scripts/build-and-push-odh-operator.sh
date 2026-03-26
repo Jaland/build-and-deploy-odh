@@ -6,12 +6,13 @@
 # from https://github.com/opendatahub-io/opendatahub-operator
 #
 # Required env:
-#   IMAGE_TAG_BASE  Full image path without tag, e.g. quay.io/myorg/opendatahub-operator
-#   QUAY_USERNAME   Registry user (for quay.io login)
+#   IMAGE_TAG_BASE  Full image path without tag for operator + bundle, e.g. quay.io/myorg/opendatahub-operator
+#   QUAY_USERNAME   Registry user (registry login; same creds for operator and catalog)
 #   QUAY_PASSWORD   Registry password or robot token
 #
 # Optional env:
-#   QUAY_REGISTRY     Host for login (default: quay.io)
+#   CATALOG_REPO    Separate catalog image path without tag (e.g. quay.io/myorg/odh-catalog-index).
+#                   If unset, catalog is ${IMAGE_TAG_BASE}-catalog:v$VERSION (upstream default).
 #   IMG_TAG           Operator image tag (default: latest)
 #   VERSION           OLM bundle/catalog version string used in bundle tag v$VERSION (Makefile default if unset)
 #   OPERATOR_GIT_REF  Branch, tag, or commit to build (default: main)
@@ -26,7 +27,6 @@
 #
 set -euo pipefail
 
-QUAY_REGISTRY="${QUAY_REGISTRY:-quay.io}"
 IMG_TAG="${IMG_TAG:-latest}"
 OPERATOR_GIT_REF="${OPERATOR_GIT_REF:-main}"
 OPERATOR_REPO_URL="${OPERATOR_REPO_URL:-https://github.com/opendatahub-io/opendatahub-operator.git}"
@@ -66,8 +66,16 @@ fi
 
 cd "$CLONE_DIR"
 
-echo "Logging in to ${QUAY_REGISTRY}..."
-echo "${QUAY_PASSWORD}" | "${IMAGE_BUILDER}" login "${QUAY_REGISTRY}" -u "${QUAY_USERNAME}" --password-stdin
+# Log in once per registry host (operator/bundle and optional catalog may use different repos or hosts).
+login_registry_hosts() {
+  local host
+  while IFS= read -r host; do
+    [[ -z "${host}" ]] && continue
+    echo "Logging in to ${host}..."
+    echo "${QUAY_PASSWORD}" | "${IMAGE_BUILDER}" login "${host}" -u "${QUAY_USERNAME}" --password-stdin
+  done < <(for ref in "$@"; do [[ -z "${ref}" ]] && continue; echo "${ref%%/*}"; done | sort -u)
+}
+login_registry_hosts "${IMAGE_TAG_BASE}" "${CATALOG_REPO:-}"
 
 export IMAGE_BUILDER
 
@@ -89,19 +97,25 @@ make "${MAKE_ARGS[@]}" image
 echo "Building and pushing bundle image..."
 make "${MAKE_ARGS[@]}" bundle-build bundle-push
 
-echo "Building and pushing catalog image..."
-make "${MAKE_ARGS[@]}" catalog-build catalog-push
-
 VERSION_RESOLVED="$(make "${MAKE_ARGS[@]}" -s print-VERSION)"
+if [[ -n "${CATALOG_REPO:-}" ]]; then
+  CATALOG_IMG="${CATALOG_REPO}:v${VERSION_RESOLVED}"
+else
+  CATALOG_IMG="${IMAGE_TAG_BASE}-catalog:v${VERSION_RESOLVED}"
+fi
+
+echo "Building and pushing catalog image..."
+make "${MAKE_ARGS[@]}" CATALOG_IMG="${CATALOG_IMG}" catalog-build catalog-push
+
 OPERATOR_IMG="${IMAGE_TAG_BASE}:${IMG_TAG}"
 BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:v${VERSION_RESOLVED}"
-CATALOG_IMG="${IMAGE_TAG_BASE}-catalog:v${VERSION_RESOLVED}"
 
 {
   echo "OPERATOR_IMAGE=${OPERATOR_IMG}"
   echo "BUNDLE_IMAGE=${BUNDLE_IMG}"
   echo "CATALOG_IMAGE=${CATALOG_IMG}"
   echo "IMAGE_TAG_BASE=${IMAGE_TAG_BASE}"
+  echo "CATALOG_REPO=${CATALOG_REPO:-}"
   echo "IMG_TAG=${IMG_TAG}"
   echo "VERSION=${VERSION_RESOLVED}"
 } | tee "$BUILD_OUTPUT_ENV"

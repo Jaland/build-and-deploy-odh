@@ -4,7 +4,9 @@
 # Configure repository secrets:
 #   QUAY_USERNAME — Quay.io username or robot account name
 #   QUAY_PASSWORD — Quay.io password or robot token
-#   QUAY_REPO — Default image path without tag (e.g. quay.io/myorg/opendatahub-operator)
+#   QUAY_REPO — Operator + bundle image path without tag (e.g. quay.io/myorg/opendatahub-operator)
+#   QUAY_CATALOG_REPO — Optional catalog index path without tag (e.g. quay.io/myorg/odh-catalog-index).
+#     If unset, catalog is pushed to ${QUAY_REPO}-catalog:v$VERSION (upstream default).
 #   QUAY_TAG — Default tag for the operator image (e.g. latest or a CI tag)
 #
 # Optional bundle deploy (advanced):
@@ -27,6 +29,11 @@ on:
         type: string
       img_tag:
         description: "Tag for the operator image (empty = secret QUAY_TAG)"
+        required: false
+        default: ""
+        type: string
+      catalog_repo:
+        description: "Catalog image path without tag (empty = secret QUAY_CATALOG_REPO)"
         required: false
         default: ""
         type: string
@@ -95,6 +102,7 @@ jobs:
         env:
           IMAGE_TAG_BASE: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag_base != '' && inputs.image_tag_base || secrets.QUAY_REPO }}
           IMG_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.img_tag != '' && inputs.img_tag || secrets.QUAY_TAG }}
+          CATALOG_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.catalog_repo != '' && inputs.catalog_repo || secrets.QUAY_CATALOG_REPO }}
           VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
           OPERATOR_GIT_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.git_ref || 'main' }}
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
