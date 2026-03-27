@@ -9,10 +9,13 @@ The script always builds and pushes the **operator** image, the OLM **bundle** i
 | Output | Image reference |
 |--------|-----------------|
 | Operator | `$IMAGE_TAG_BASE:$IMG_TAG` |
-| Bundle | `$IMAGE_TAG_BASE-bundle:v$VERSION` |
-| Catalog | If `CATALOG_REPO` is set: `$CATALOG_REPO:v$VERSION`. Otherwise (upstream default): `$IMAGE_TAG_BASE-catalog:v$VERSION` |
+| Bundle | If `BUNDLE_REPO` is set: `$BUNDLE_REPO:v$VERSION`. Otherwise: `$IMAGE_TAG_BASE-bundle:v$VERSION` |
+| Catalog | If `CATALOG_REPO` is set: `$CATALOG_REPO:v$VERSION`. Otherwise: `$IMAGE_TAG_BASE-catalog:v$VERSION` |
 
-`VERSION` comes from the upstream Makefile unless you override it (see below).
+**Two different “versions”:**
+
+- **`IMG_TAG`** (from `QUAY_TAG` or `img_tag`) is only the **operator** container tag: `quay.io/org/opendatahub-operator:mytag`.
+- **`VERSION`** is the **OLM** bundle/catalog version used in image tags like `…-bundle:v3.3.0` and `…:v3.3.0`. It defaults to whatever the [upstream Makefile](https://github.com/opendatahub-io/opendatahub-operator/blob/main/Makefile) sets (often `3.3.0`) unless you set **`QUAY_OLM_VERSION`** (repository variable or secret) or the workflow **`version`** input. It does **not** follow `QUAY_TAG` automatically.
 
 ## GitHub Actions
 
@@ -20,8 +23,21 @@ Workflow: [`.github/workflows/build-odh-operator-catalog.yml`](.github/workflows
 
 ### Triggers
 
-- **Push to `main`** — builds and pushes using repository secrets (no manual inputs).
-- **Workflow dispatch** — same as above, with optional inputs to override repo, tag, upstream ref, OLM version, or to deploy the bundle to a cluster.
+- **Push to `main`** — uses repository **variables** (and **secrets** for Quay credentials).
+- **Workflow dispatch** — optional inputs override variables/secrets for that run.
+
+### Repository variables (recommended for image paths and tags)
+
+Configure under **Settings → Secrets and variables → Actions → Variables**. These values are **not** redacted in workflow logs. The workflow reads **`vars.NAME` first**, then falls back to **`secrets.NAME`** if you still store the same name as a secret.
+
+| Variable | Purpose |
+|----------|---------|
+| `QUAY_REPO` | Operator image path **without** tag (e.g. `quay.io/myorg/opendatahub-operator`) |
+| `QUAY_TAG` | Tag for the **operator** image only. If unset, the script defaults to `latest`. |
+| `QUAY_OLM_VERSION` | Optional. OLM bundle/catalog version without a leading `v` (e.g. `3.4.0`). If unset, the upstream Makefile default applies (often `3.3.0`). |
+| `QUAY_BUNDLE_REPO` | Optional. Separate **OLM bundle** image path **without** tag. If unset, bundle is `${QUAY_REPO}-bundle:v$VERSION`. |
+| `QUAY_CATALOG_REPO` | Optional. Separate **catalog** index path **without** tag. If unset, catalog is `${QUAY_REPO}-catalog:v$VERSION`. |
+| `MAAS_MANIFEST_*` | Optional MaaS overrides; same names as in the workflow file (`MAAS_MANIFEST_REF`, `MAAS_MANIFEST_PIN_LATEST`, etc.). |
 
 ### Required repository secrets
 
@@ -29,38 +45,31 @@ Workflow: [`.github/workflows/build-odh-operator-catalog.yml`](.github/workflows
 |--------|---------|
 | `QUAY_USERNAME` | Quay.io user or robot account name |
 | `QUAY_PASSWORD` | Quay.io password or robot token |
-| `QUAY_REPO` | Operator + bundle image path **without** tag (e.g. `quay.io/myorg/opendatahub-operator`) |
-| `QUAY_TAG` | Default tag for the **operator** image (e.g. `latest`). If unset or empty, the script defaults to `latest`. |
 
 ### Optional secrets
 
 | Secret | When |
 |--------|------|
-| `QUAY_CATALOG_REPO` | Catalog index image path **without** tag (e.g. `quay.io/myorg/odh-catalog-index`). If unset, the catalog is pushed to `${QUAY_REPO}-catalog:v$VERSION`. |
-| `KUBECONFIG` | Raw kubeconfig file contents, only if you run **workflow dispatch** with **Deploy bundle** enabled |
-| `MAAS_MANIFEST_REF` | If set (e.g. `main`), overrides the **maas** component in [get_all_manifests.sh](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) via `--maas=org:repo:ref:path` (same mechanism upstream documents for `--component=value`). Empty = keep the operator repo’s pinned revision. |
-| `MAAS_MANIFEST_PIN_LATEST` | Set to `1` or `true` with `MAAS_MANIFEST_REF=main` to resolve `main@<current_sha>` for a reproducible build. |
-| `MAAS_MANIFEST_REPO` | Optional; GitHub repo name (default `maas-billing`). Use another name (e.g. a fork) if your manifests live elsewhere. |
-| `MAAS_MANIFEST_ORG` | Optional (default `opendatahub-io`). |
-| `MAAS_MANIFEST_SOURCE_PATH` | Optional (default `deployment`). |
-| `MAAS_MANIFEST_WRITE_FILE` | Set to `1` to rewrite every `["maas"]=...` line in the cloned `get_all_manifests.sh` to match the override (optional visibility only). |
+| `KUBECONFIG` | Raw kubeconfig, only for **workflow dispatch** with **Deploy bundle** enabled |
+| Same names as variables | Fallback only if you prefer not to use repository variables; values are **masked** in logs. |
 
 ### Manual run inputs (workflow dispatch)
 
-Leave any field empty to keep using the matching repository secret.
+Leave any field empty to keep using the matching **variable** or **secret**.
 
 | Input | Meaning |
 |-------|---------|
 | `image_tag_base` | Overrides `QUAY_REPO` for that run |
 | `img_tag` | Overrides `QUAY_TAG` for that run |
+| `bundle_repo` | Overrides `QUAY_BUNDLE_REPO` for that run |
 | `catalog_repo` | Overrides `QUAY_CATALOG_REPO` for that run |
-| `version` | OLM bundle/catalog `VERSION` (empty = upstream Makefile default) |
+| `version` | OLM `VERSION` (empty = variable or secret `QUAY_OLM_VERSION`, else Makefile default) |
 | `git_ref` | Upstream branch, tag, or commit (default `main`) |
 | `deploy_bundle` | After push, run `operator-sdk run bundle` (needs `KUBECONFIG`) |
 | `maas_manifest_ref` | Overrides `MAAS_MANIFEST_REF` for that run |
 | `maas_manifest_pin_latest` | Pin `main` to the current commit (`main@sha`) |
-| `maas_manifest_repo` / `maas_manifest_org` / `maas_manifest_source_path` | Override the matching secrets for that run |
-| `maas_manifest_write_file` | Same as secret `MAAS_MANIFEST_WRITE_FILE` |
+| `maas_manifest_repo` / `maas_manifest_org` / `maas_manifest_source_path` | Override the matching variable or secret for that run |
+| `maas_manifest_write_file` | Same as variable or secret `MAAS_MANIFEST_WRITE_FILE` |
 
 ### Optional MaaS (Models-as-a-Service) manifest source
 
@@ -71,18 +80,23 @@ The operator pulls **maas** manifests from GitHub (by default [maas-billing](htt
 After a successful run:
 
 - **Job summary** on the workflow run lists operator, bundle, and catalog image URLs, plus a **Models-as-a-Service deploy** section with the exact `./scripts/deploy.sh` command (same as below).
-- **Job outputs:** `operator_image`, `bundle_image`, `catalog_image`, `version`, `maas_deploy_command`.
-- **Artifact:** `build-output-env` (same key/value pairs as `build-output.env`, including `MAAS_DEPLOY_COMMAND`).
+- **Job outputs:** `operator_image`, `bundle_image`, `catalog_image`, `version`, `maas_deploy_command`, `maas_deploy_snippet` (comment + `deploy.sh` line, including your **bundle** image when using a custom `BUNDLE_REPO`).
+- **Artifact:** `build-output-env` (includes `MAAS_DEPLOY_COMMAND`, `MAAS_DEPLOY_SNIPPET`, and `BUNDLE_IMAGE`).
+
+### Why does the log show `***` instead of image names?
+
+Only if those strings still live in **secrets**. Use **repository variables** for `QUAY_REPO`, `QUAY_TAG`, and related fields so full image names appear in the job summary. See [using secrets in GitHub Actions](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) and [variables](https://docs.github.com/en/actions/learn-github-actions/variables#defining-configuration-variables-for-multiple-workflows).
 
 ### Deploy MaaS with your operator images ([Models-as-a-Service](https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/))
 
-The [maas-billing](https://github.com/opendatahub-io/maas-billing) repository ships `scripts/deploy.sh`, which accepts a custom operator catalog image and operator image (see `--operator-catalog` and `--operator-image` in that script). After cloning that repo, run from the repository root:
+The [maas-billing](https://github.com/opendatahub-io/maas-billing) repository ships `scripts/deploy.sh`, which accepts **`--operator-catalog`** (the **catalog/index** image) and **`--operator-image`** (the operator container image). It does **not** take a separate bundle flag: the catalog you built already points at your **OLM bundle** image. The workflow prints a two-line snippet (bundle comment + command) so a custom **`BUNDLE_REPO`** is explicit. After cloning that repo, run from the repository root:
 
 ```bash
+# OLM bundle image (indexed by the catalog above): '<BUNDLE_IMAGE>'
 ./scripts/deploy.sh --operator-catalog '<CATALOG_IMAGE>' --operator-image '<OPERATOR_IMAGE>'
 ```
 
-Replace the placeholders with the `CATALOG_IMAGE` and `OPERATOR_IMAGE` values from this workflow’s summary, job outputs, or `build-output.env`. The build script prints the same one-liner at the end of a successful local run.
+Use `CATALOG_IMAGE`, `OPERATOR_IMAGE`, and `BUNDLE_IMAGE` from `build-output.env` or job outputs (`maas_deploy_snippet` is the full block).
 
 ## Local build (script)
 
@@ -90,7 +104,8 @@ Clone this repo, install [Go](https://go.dev/) (see upstream `go.mod`), [Podman]
 
 ```bash
 export IMAGE_TAG_BASE=quay.io/myorg/opendatahub-operator
-export CATALOG_REPO=quay.io/myorg/odh-catalog-index   # optional; separate catalog Quay repo
+export BUNDLE_REPO=quay.io/myorg/odh-operator-bundle  # optional; separate OLM bundle image
+export CATALOG_REPO=quay.io/myorg/odh-catalog-index   # optional; separate catalog image
 export QUAY_USERNAME=youruser
 export QUAY_PASSWORD=yourtoken
 export IMG_TAG=latest                    # optional

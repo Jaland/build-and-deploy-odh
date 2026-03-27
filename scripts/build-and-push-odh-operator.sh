@@ -6,11 +6,13 @@
 # from https://github.com/opendatahub-io/opendatahub-operator
 #
 # Required env:
-#   IMAGE_TAG_BASE  Full image path without tag for operator + bundle, e.g. quay.io/myorg/opendatahub-operator
-#   QUAY_USERNAME   Registry user (registry login; same creds for operator and catalog)
+#   IMAGE_TAG_BASE  Full image path without tag for the operator image, e.g. quay.io/myorg/opendatahub-operator
+#   QUAY_USERNAME   Registry user (registry login; same creds for operator, bundle, catalog)
 #   QUAY_PASSWORD   Registry password or robot token
 #
 # Optional env:
+#   BUNDLE_REPO     Separate OLM bundle image path without tag (e.g. quay.io/myorg/odh-operator-bundle).
+#                   If unset, bundle is ${IMAGE_TAG_BASE}-bundle:v$VERSION (upstream default).
 #   CATALOG_REPO    Separate catalog image path without tag (e.g. quay.io/myorg/odh-catalog-index).
 #                   If unset, catalog is ${IMAGE_TAG_BASE}-catalog:v$VERSION (upstream default).
 #   IMG_TAG           Operator image tag (default: latest)
@@ -87,7 +89,7 @@ login_registry_hosts() {
     echo "${QUAY_PASSWORD}" | "${IMAGE_BUILDER}" login "${host}" -u "${QUAY_USERNAME}" --password-stdin
   done < <(for ref in "$@"; do [[ -z "${ref}" ]] && continue; echo "${ref%%/*}"; done | sort -u)
 }
-login_registry_hosts "${IMAGE_TAG_BASE}" "${CATALOG_REPO:-}"
+login_registry_hosts "${IMAGE_TAG_BASE}" "${BUNDLE_REPO:-}" "${CATALOG_REPO:-}"
 
 export IMAGE_BUILDER
 
@@ -161,36 +163,45 @@ fi
 echo "Building and pushing operator image..."
 make "${MAKE_ARGS[@]}" image
 
-echo "Building and pushing bundle image..."
-make "${MAKE_ARGS[@]}" bundle-build bundle-push
-
 VERSION_RESOLVED="$(make "${MAKE_ARGS[@]}" -s print-VERSION)"
+if [[ -n "${BUNDLE_REPO:-}" ]]; then
+  BUNDLE_IMG="${BUNDLE_REPO}:v${VERSION_RESOLVED}"
+else
+  BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:v${VERSION_RESOLVED}"
+fi
 if [[ -n "${CATALOG_REPO:-}" ]]; then
   CATALOG_IMG="${CATALOG_REPO}:v${VERSION_RESOLVED}"
 else
   CATALOG_IMG="${IMAGE_TAG_BASE}-catalog:v${VERSION_RESOLVED}"
 fi
 
-echo "Building and pushing catalog image..."
-make "${MAKE_ARGS[@]}" CATALOG_IMG="${CATALOG_IMG}" catalog-build catalog-push
+echo "Building and pushing bundle image (${BUNDLE_IMG})..."
+make "${MAKE_ARGS[@]}" BUNDLE_IMG="${BUNDLE_IMG}" bundle-build bundle-push
+
+echo "Building and pushing catalog image (${CATALOG_IMG})..."
+make "${MAKE_ARGS[@]}" BUNDLE_IMGS="${BUNDLE_IMG}" CATALOG_IMG="${CATALOG_IMG}" catalog-build catalog-push
 
 OPERATOR_IMG="${IMAGE_TAG_BASE}:${IMG_TAG}"
-BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:v${VERSION_RESOLVED}"
 
 # Models-as-a-Service: https://github.com/opendatahub-io/maas-billing/blob/main/scripts/deploy.sh
+# deploy.sh takes catalog + operator images; the catalog index references the OLM bundle below.
 MAAS_DEPLOY_COMMAND="./scripts/deploy.sh --operator-catalog ${CATALOG_IMG} --operator-image ${OPERATOR_IMG}"
+MAAS_DEPLOY_SNIPPET="# OLM bundle image (indexed by the catalog above): ${BUNDLE_IMG}
+${MAAS_DEPLOY_COMMAND}"
 
 {
   echo "OPERATOR_IMAGE=${OPERATOR_IMG}"
   echo "BUNDLE_IMAGE=${BUNDLE_IMG}"
   echo "CATALOG_IMAGE=${CATALOG_IMG}"
   echo "IMAGE_TAG_BASE=${IMAGE_TAG_BASE}"
+  echo "BUNDLE_REPO=${BUNDLE_REPO:-}"
   echo "CATALOG_REPO=${CATALOG_REPO:-}"
   echo "MAAS_OVERRIDE=${maas_override:-}"
   echo "IMG_TAG=${IMG_TAG}"
   echo "VERSION=${VERSION_RESOLVED}"
   # Shell-quote so `source build-output.env` does not treat --flags as commands
   printf 'MAAS_DEPLOY_COMMAND=%q\n' "${MAAS_DEPLOY_COMMAND}"
+  printf 'MAAS_DEPLOY_SNIPPET=%q\n' "${MAAS_DEPLOY_SNIPPET}"
 } | tee "$BUILD_OUTPUT_ENV"
 
 echo ""
@@ -201,6 +212,7 @@ echo "Catalog image:  ${CATALOG_IMG}"
 echo "===================================="
 echo ""
 echo "MaaS / Models-as-a-Service deploy (from a maas-billing clone):"
+echo "  # OLM bundle image (indexed by catalog): ${BUNDLE_IMG}"
 echo "  ${MAAS_DEPLOY_COMMAND}"
 echo "Docs: https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/"
 

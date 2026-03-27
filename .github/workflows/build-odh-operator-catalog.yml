@@ -1,18 +1,22 @@
 # Build and push Open Data Hub operator, OLM bundle, and catalog images
 # (upstream: https://github.com/opendatahub-io/opendatahub-operator)
 #
-# Configure repository secrets:
+# Configure repository variables (Settings → Secrets and variables → Actions → Variables) — recommended for
+# image paths/tags so logs are not redacted. Optional secrets with the same names still work as fallback.
+#   QUAY_REPO — Operator image path without tag (e.g. quay.io/myorg/opendatahub-operator)
+#   QUAY_BUNDLE_REPO — Optional OLM bundle image path without tag (e.g. quay.io/myorg/odh-operator-bundle).
+#     If unset, bundle is ${QUAY_REPO}-bundle:v$VERSION
+#   QUAY_CATALOG_REPO — Optional catalog index path without tag
+#   QUAY_TAG — Operator image tag only (not OLM bundle version)
+#   QUAY_OLM_VERSION — Optional OLM bundle/catalog VERSION (e.g. 3.4.0); tags …-bundle:v$VERSION and …:v$VERSION
+#
+# Secrets (required):
 #   QUAY_USERNAME — Quay.io username or robot account name
 #   QUAY_PASSWORD — Quay.io password or robot token
-#   QUAY_REPO — Operator + bundle image path without tag (e.g. quay.io/myorg/opendatahub-operator)
-#   QUAY_CATALOG_REPO — Optional catalog index path without tag (e.g. quay.io/myorg/odh-catalog-index).
-#     If unset, catalog is pushed to ${QUAY_REPO}-catalog:v$VERSION (upstream default).
-#   QUAY_TAG — Default tag for the operator image (e.g. latest or a CI tag)
 #
-# Optional MaaS (maas-billing / models-as-a-service) manifest override:
-#   MAAS_MANIFEST_REF — e.g. main (see script). Empty = use upstream pin in get_all_manifests.sh
-#   MAAS_MANIFEST_PIN_LATEST — 1/true with MAAS_MANIFEST_REF=main to use main@<sha>
-#   MAAS_MANIFEST_REPO — optional; default maas-billing (set if you use another repo name)
+# Optional MaaS manifest overrides (variables preferred; same-name secrets as fallback):
+#   MAAS_MANIFEST_REF, MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_REPO, MAAS_MANIFEST_ORG,
+#   MAAS_MANIFEST_SOURCE_PATH, MAAS_MANIFEST_WRITE_FILE
 #
 # Optional bundle deploy (advanced):
 #   - Set workflow input deploy_bundle to true
@@ -28,22 +32,27 @@ on:
   workflow_dispatch:
     inputs:
       image_tag_base:
-        description: "Full image repo without tag (empty = secret QUAY_REPO)"
+        description: "Full image repo without tag (empty = variable or secret QUAY_REPO)"
         required: false
         default: ""
         type: string
       img_tag:
-        description: "Tag for the operator image (empty = secret QUAY_TAG)"
+        description: "Tag for the operator image (empty = variable or secret QUAY_TAG)"
         required: false
         default: ""
         type: string
       catalog_repo:
-        description: "Catalog image path without tag (empty = secret QUAY_CATALOG_REPO)"
+        description: "Catalog image path without tag (empty = variable or secret QUAY_CATALOG_REPO)"
+        required: false
+        default: ""
+        type: string
+      bundle_repo:
+        description: "OLM bundle image path without tag (empty = variable or secret QUAY_BUNDLE_REPO)"
         required: false
         default: ""
         type: string
       version:
-        description: "OLM bundle/catalog VERSION (empty = upstream Makefile default)"
+        description: "OLM VERSION e.g. 3.4.0 (empty = variable or secret QUAY_OLM_VERSION, else Makefile default)"
         required: false
         default: ""
         type: string
@@ -58,7 +67,7 @@ on:
         default: false
         type: boolean
       maas_manifest_ref:
-        description: "Override maas manifests ref (empty = secret MAAS_MANIFEST_REF or upstream default)"
+        description: "Override maas manifests ref (empty = variable or secret MAAS_MANIFEST_REF)"
         required: false
         default: ""
         type: string
@@ -68,17 +77,17 @@ on:
         default: false
         type: boolean
       maas_manifest_repo:
-        description: "GitHub repo name for maas manifests (empty = secret MAAS_MANIFEST_REPO or maas-billing)"
+        description: "GitHub repo name for maas manifests (empty = variable or secret MAAS_MANIFEST_REPO)"
         required: false
         default: ""
         type: string
       maas_manifest_org:
-        description: "GitHub org (empty = secret MAAS_MANIFEST_ORG or opendatahub-io)"
+        description: "GitHub org (empty = variable or secret MAAS_MANIFEST_ORG)"
         required: false
         default: ""
         type: string
       maas_manifest_source_path:
-        description: "Path inside repo (empty = secret MAAS_MANIFEST_SOURCE_PATH or deployment)"
+        description: "Path inside repo (empty = variable or secret MAAS_MANIFEST_SOURCE_PATH)"
         required: false
         default: ""
         type: string
@@ -101,6 +110,7 @@ jobs:
       catalog_image: ${{ steps.export.outputs.catalog_image }}
       version: ${{ steps.export.outputs.version }}
       maas_deploy_command: ${{ steps.export.outputs.maas_deploy_command }}
+      maas_deploy_snippet: ${{ steps.export.outputs.maas_deploy_snippet }}
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
@@ -136,21 +146,22 @@ jobs:
 
       - name: Build and push images
         env:
-          IMAGE_TAG_BASE: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag_base != '' && inputs.image_tag_base || secrets.QUAY_REPO }}
-          IMG_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.img_tag != '' && inputs.img_tag || secrets.QUAY_TAG }}
-          CATALOG_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.catalog_repo != '' && inputs.catalog_repo || secrets.QUAY_CATALOG_REPO }}
-          VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+          IMAGE_TAG_BASE: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag_base != '' && inputs.image_tag_base || vars.QUAY_REPO || secrets.QUAY_REPO }}
+          IMG_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.img_tag != '' && inputs.img_tag || vars.QUAY_TAG || secrets.QUAY_TAG }}
+          BUNDLE_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_repo != '' && inputs.bundle_repo || vars.QUAY_BUNDLE_REPO || secrets.QUAY_BUNDLE_REPO }}
+          CATALOG_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.catalog_repo != '' && inputs.catalog_repo || vars.QUAY_CATALOG_REPO || secrets.QUAY_CATALOG_REPO }}
+          VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' && inputs.version || vars.QUAY_OLM_VERSION || secrets.QUAY_OLM_VERSION }}
           OPERATOR_GIT_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.git_ref || 'main' }}
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
           QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
           DEPLOY_BUNDLE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_bundle == true && '1' || '0' }}
           BUILD_OUTPUT_ENV: ${{ github.workspace }}/build-output.env
-          MAAS_MANIFEST_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_ref != '' && inputs.maas_manifest_ref || secrets.MAAS_MANIFEST_REF }}
-          MAAS_MANIFEST_PIN_LATEST: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_pin_latest == true && '1' || secrets.MAAS_MANIFEST_PIN_LATEST }}
-          MAAS_MANIFEST_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo != '' && inputs.maas_manifest_repo || secrets.MAAS_MANIFEST_REPO }}
-          MAAS_MANIFEST_ORG: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_org != '' && inputs.maas_manifest_org || secrets.MAAS_MANIFEST_ORG }}
-          MAAS_MANIFEST_SOURCE_PATH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_source_path != '' && inputs.maas_manifest_source_path || secrets.MAAS_MANIFEST_SOURCE_PATH }}
-          MAAS_MANIFEST_WRITE_FILE: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_write_file == true && '1' || secrets.MAAS_MANIFEST_WRITE_FILE }}
+          MAAS_MANIFEST_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_ref != '' && inputs.maas_manifest_ref || vars.MAAS_MANIFEST_REF || secrets.MAAS_MANIFEST_REF }}
+          MAAS_MANIFEST_PIN_LATEST: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_pin_latest == true && '1' || vars.MAAS_MANIFEST_PIN_LATEST || secrets.MAAS_MANIFEST_PIN_LATEST }}
+          MAAS_MANIFEST_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo != '' && inputs.maas_manifest_repo || vars.MAAS_MANIFEST_REPO || secrets.MAAS_MANIFEST_REPO }}
+          MAAS_MANIFEST_ORG: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_org != '' && inputs.maas_manifest_org || vars.MAAS_MANIFEST_ORG || secrets.MAAS_MANIFEST_ORG }}
+          MAAS_MANIFEST_SOURCE_PATH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_source_path != '' && inputs.maas_manifest_source_path || vars.MAAS_MANIFEST_SOURCE_PATH || secrets.MAAS_MANIFEST_SOURCE_PATH }}
+          MAAS_MANIFEST_WRITE_FILE: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_write_file == true && '1' || vars.MAAS_MANIFEST_WRITE_FILE || secrets.MAAS_MANIFEST_WRITE_FILE }}
         run: ./scripts/build-and-push-odh-operator.sh
 
       - name: Export job outputs (where the build is)
@@ -166,20 +177,29 @@ jobs:
             echo "version=${VERSION}"
             echo "maas_deploy_command=${MAAS_DEPLOY_COMMAND}"
           } >> "$GITHUB_OUTPUT"
+          {
+            echo "maas_deploy_snippet<<MAAS_SNIP"
+            echo "${MAAS_DEPLOY_SNIPPET}"
+            echo "MAAS_SNIP"
+          } >> "$GITHUB_OUTPUT"
           echo "### Built images" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tags:** The **operator** image uses \`QUAY_TAG\` / \`img_tag\` (\`operator_image\`). **Bundle** and **catalog** images use OLM \`VERSION\` in the form \`v\$VERSION\` (from repository variable \`QUAY_OLM_VERSION\`, the \`version\` input, or the upstream Makefile default). They are not the same as the operator tag." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Logs:** Values stored as [secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) are masked as \`***\` in logs. Use [repository variables](https://docs.github.com/en/actions/learn-github-actions/variables#defining-configuration-variables-for-multiple-workflows) for image paths and tags to see full names here (keep \`QUAY_USERNAME\` / \`QUAY_PASSWORD\` as secrets)." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Operator:** \`${OPERATOR_IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Bundle:** \`${BUNDLE_IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Catalog:** \`${CATALOG_IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Job outputs: \`operator_image\`, \`bundle_image\`, \`catalog_image\`, \`version\`, \`maas_deploy_command\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "Job outputs: \`operator_image\`, \`bundle_image\`, \`catalog_image\`, \`version\`, \`maas_deploy_command\`, \`maas_deploy_snippet\`." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Models-as-a-Service (MaaS) deploy" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "These images are built for the Open Data Hub operator (including the **maas** component). To install MaaS on a cluster using your operator and catalog images, clone [opendatahub-io/maas-billing](https://github.com/opendatahub-io/maas-billing) and run \`scripts/deploy.sh\` with the catalog and operator image references. See [Models-as-a-Service install](https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/) for details." >> "$GITHUB_STEP_SUMMARY"
+          echo "These images are built for the Open Data Hub operator (including the **maas** component). [\`deploy.sh\`](https://github.com/opendatahub-io/maas-billing/blob/main/scripts/deploy.sh) takes **\`--operator-catalog\`** (index image) and **\`--operator-image\`**; the catalog you built already references your **OLM bundle** image below. See [Models-as-a-Service install](https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/)." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo '```bash' >> "$GITHUB_STEP_SUMMARY"
-          echo "${MAAS_DEPLOY_COMMAND}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${MAAS_DEPLOY_SNIPPET}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build metadata
