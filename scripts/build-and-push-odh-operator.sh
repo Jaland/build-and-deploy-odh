@@ -28,14 +28,16 @@
 #   BUILD_OUTPUT_ENV  Path for KEY=value summary (default: <repo>/build-output.env)
 #
 # Optional MaaS / models-as-a-service manifests (upstream get_all_manifests.sh supports --maas=...):
-#   MAAS_MANIFEST_REF   If unset, upstream get_all_manifests.sh uses its baked-in pin (often main@<sha>), NOT latest main.
-#                       Set to main so each run fetches the current tip of main (latest commit at fetch time).
-#                       Set to main@<sha> or use MAAS_MANIFEST_PIN_LATEST to pin an explicit commit.
+#   By default this script passes --maas=opendatahub-io:models-as-a-service:main:deployment so each build
+#   tracks https://github.com/opendatahub-io/models-as-a-service (branch main, path deployment/).
+#   MAAS_MANIFEST_USE_UPSTREAM_PIN  If 1/true, do NOT pass --maas=; use the maas pin baked into upstream
+#                       get_all_manifests.sh (e.g. maas-billing@sha for ODH) instead.
+#   MAAS_MANIFEST_REF   Branch or ref (default: main). Use main@<sha> for a fixed commit.
 #   MAAS_MANIFEST_PIN_LATEST  If 1/true with MAAS_MANIFEST_REF=main, pass main@<sha> where sha is from git ls-remote
-#                       at script start (reproducible; still “current main” for that run).
+#                       at script start (reproducible snapshot of main for that run).
 #   The on-disk get_all_manifests.sh is NOT modified unless MAAS_MANIFEST_WRITE_FILE=1; overrides are CLI-only.
 #   MAAS_MANIFEST_ORG   GitHub org (default: opendatahub-io)
-#   MAAS_MANIFEST_REPO  Repo name (default: maas-billing; use models-as-a-service or another fork if needed)
+#   MAAS_MANIFEST_REPO  Repo name (default: models-as-a-service)
 #   MAAS_MANIFEST_SOURCE_PATH  Path inside repo (default: deployment)
 #   ODH_PLATFORM_TYPE   OpenDataHub (default) or rhoai — selects which base manifest map is used before override
 #   MAAS_MANIFEST_WRITE_FILE  If 1, rewrite the ["maas"]= line in get_all_manifests.sh to match the override
@@ -112,10 +114,9 @@ resolve_branch_head_sha() {
 
 build_maas_manifest_override() {
   local org="${MAAS_MANIFEST_ORG:-opendatahub-io}"
-  local repo="${MAAS_MANIFEST_REPO:-maas-billing}"
+  local repo="${MAAS_MANIFEST_REPO:-models-as-a-service}"
   local path="${MAAS_MANIFEST_SOURCE_PATH:-deployment}"
-  local ref="${MAAS_MANIFEST_REF:-}"
-  [[ -n "${ref}" ]] || return 1
+  local ref="${MAAS_MANIFEST_REF:-main}"
   if [[ "${MAAS_MANIFEST_PIN_LATEST:-}" == "1" || "${MAAS_MANIFEST_PIN_LATEST:-}" == "true" ]]; then
     if [[ "${ref}" != "main" ]]; then
       echo "ERROR: MAAS_MANIFEST_PIN_LATEST requires MAAS_MANIFEST_REF=main" >&2
@@ -163,14 +164,16 @@ validate_maas_manifests() {
 
 if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
   echo "Fetching component manifests (get_all_manifests.sh)..."
-  if [[ -n "${MAAS_MANIFEST_REF:-}" ]]; then
+  if [[ "${MAAS_MANIFEST_USE_UPSTREAM_PIN:-}" == "1" || "${MAAS_MANIFEST_USE_UPSTREAM_PIN:-}" == "true" ]]; then
+    echo "NOTE: MAAS_MANIFEST_USE_UPSTREAM_PIN=1 — using the maas pin in upstream get_all_manifests.sh (not opendatahub-io/models-as-a-service:main)."
+  else
     ref_resolved="$(build_maas_manifest_override)"
     MAAS_RESOLVED_REF="${ref_resolved}"
     org="${MAAS_MANIFEST_ORG:-opendatahub-io}"
-    repo="${MAAS_MANIFEST_REPO:-maas-billing}"
+    repo="${MAAS_MANIFEST_REPO:-models-as-a-service}"
     path="${MAAS_MANIFEST_SOURCE_PATH:-deployment}"
     maas_override="${org}:${repo}:${ref_resolved}:${path}"
-    echo "MaaS manifest override: --maas=${maas_override}"
+    echo "MaaS manifests: https://github.com/${org}/${repo} @ ${ref_resolved} (path: ${path}/) — --maas=${maas_override}"
     maybe_patch_get_all_manifests_file "${maas_override}"
   fi
   VERSION_FOR_MANIFESTS="$(make "${MAKE_ARGS[@]}" -s print-VERSION 2>/dev/null || true)"
