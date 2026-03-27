@@ -73,15 +73,23 @@ Leave any field empty to keep using the matching **variable** or **secret**.
 
 ### Optional MaaS (Models-as-a-Service) manifest source
 
-The operator pulls **maas** manifests from GitHub (by default [maas-billing](https://github.com/opendatahub-io/maas-billing) under `deployment/`). To track **`main`** or the **latest commit on `main`** instead of the operator’s baked-in pin, set **`MAAS_MANIFEST_REF=main`**. Add **`MAAS_MANIFEST_PIN_LATEST=1`** to use the `main@<sha>` form the upstream script supports. To use a different repository name (for example another fork), set **`MAAS_MANIFEST_REPO`**. **`ODH_PLATFORM_TYPE=rhoai`** is supported when you need the RHOAI manifest map before the same `--maas=` override.
+The operator pulls **maas** manifests from GitHub (by default [maas-billing](https://github.com/opendatahub-io/maas-billing) under `deployment/`).
+
+- **If you do nothing:** `get_all_manifests.sh` in the operator repo uses a **fixed pin** in its map (often `main@<commit>`). That is **not** automatically “latest `main`” on every build.
+- **To follow `main` at each run:** set **`MAAS_MANIFEST_REF=main`**. The script passes `--maas=…:main:…` so the upstream fetch uses the **current tip of `main`** when the job runs (no permanent edit to `get_all_manifests.sh` unless **`MAAS_MANIFEST_WRITE_FILE=1`**).
+- **To pin a commit explicitly:** set **`MAAS_MANIFEST_PIN_LATEST=1`** with **`MAAS_MANIFEST_REF=main`** (resolves to `main@<sha>` via `git ls-remote` at the start of the build), or pass a ref like **`main@abcdef…`** yourself.
+
+After a successful fetch with a MaaS override, the build script **checks** that `opt/manifests/maas` exists and contains at least one file, and writes **`MAAS_MANIFEST_RESOLVED_REF`** to `build-output.env`.
+
+To use a different repository name (for example another fork), set **`MAAS_MANIFEST_REPO`**. **`ODH_PLATFORM_TYPE=rhoai`** is supported when you need the RHOAI manifest map before the same `--maas=` override.
 
 ### Where to find the image references
 
 After a successful run:
 
 - **Job summary** on the workflow run lists operator, bundle, and catalog image URLs, plus a **Models-as-a-Service deploy** section with the exact `./scripts/deploy.sh` command (same as below).
-- **Job outputs:** `operator_image`, `bundle_image`, `catalog_image`, `version`, `maas_deploy_command`, `maas_deploy_snippet` (comment + `deploy.sh` line, including your **bundle** image when using a custom `BUNDLE_REPO`).
-- **Artifact:** `build-output-env` (includes `MAAS_DEPLOY_COMMAND`, `MAAS_DEPLOY_SNIPPET`, and `BUNDLE_IMAGE`).
+- **Job outputs:** `operator_image`, `bundle_image`, `catalog_image`, `version`, `operator_starting_csv`, `maas_deploy_command`, `maas_deploy_snippet` (comments + `deploy.sh` line, including your **bundle** image when using a custom `BUNDLE_REPO`).
+- **Artifact:** `build-output-env` (includes `OPERATOR_STARTING_CSV`, `MAAS_DEPLOY_COMMAND`, `MAAS_DEPLOY_SNIPPET`, and `BUNDLE_IMAGE`).
 
 ### Why does the log show `***` instead of image names?
 
@@ -89,14 +97,23 @@ Only if those strings still live in **secrets**. Use **repository variables** fo
 
 ### Deploy MaaS with your operator images ([Models-as-a-Service](https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/))
 
-The [maas-billing](https://github.com/opendatahub-io/maas-billing) repository ships `scripts/deploy.sh`, which accepts **`--operator-catalog`** (the **catalog/index** image) and **`--operator-image`** (the operator container image). It does **not** take a separate bundle flag: the catalog you built already points at your **OLM bundle** image. The workflow prints a two-line snippet (bundle comment + command) so a custom **`BUNDLE_REPO`** is explicit. After cloning that repo, run from the repository root:
+The [maas-billing](https://github.com/opendatahub-io/maas-billing) repository ships `scripts/deploy.sh`, which accepts **`--operator-catalog`** (the **catalog/index** image), **`--operator-image`** (the operator container image), and **`--channel`** (use **`fast`** for ODH, matching the operator bundle default). Set **`OPERATOR_STARTING_CSV`** in the environment to the **ClusterServiceVersion** name for this bundle (same as OLM `Subscription` `startingCSV`), e.g. `opendatahub-operator.v3.3.0` — the build writes **`OPERATOR_STARTING_CSV`** in `build-output.env` to match **`VERSION`**. It does **not** take a separate bundle flag: the catalog you built already points at your **OLM bundle** image. The workflow prints a snippet (bundle comment + startingCSV + command) so a custom **`BUNDLE_REPO`** is explicit. After cloning that repo, run from the repository root:
 
 ```bash
 # OLM bundle image (indexed by the catalog above): '<BUNDLE_IMAGE>'
-./scripts/deploy.sh --operator-catalog '<CATALOG_IMAGE>' --operator-image '<OPERATOR_IMAGE>'
+# Subscription startingCSV (matches bundle CSV): '<OPERATOR_STARTING_CSV>'
+OPERATOR_STARTING_CSV='<OPERATOR_STARTING_CSV>' ./scripts/deploy.sh --operator-catalog '<CATALOG_IMAGE>' --operator-image '<OPERATOR_IMAGE>' --channel fast
 ```
 
 Use `CATALOG_IMAGE`, `OPERATOR_IMAGE`, and `BUNDLE_IMAGE` from `build-output.env` or job outputs (`maas_deploy_snippet` is the full block).
+
+#### OLM channels: `fast` vs `fast-3`
+
+**Channel names are not derived from `VERSION`.** OLM treats a channel as an arbitrary string. Whether your bundle version is `3.3.0`, `4.0.0`, or anything else has **no automatic effect** on whether the channel is called `fast`, `fast-3`, or something else.
+
+This repository runs the upstream **`make bundle-build` / `catalog-build`** flow. For `ODH_PLATFORM_TYPE=OpenDataHub`, the upstream **Makefile** defaults to **`CHANNELS=fast`**, and the **file-based catalog** template (`config/catalog/fbc-basic-template.yaml` and `hack/update-catalog-template.sh`) is written for a channel literally named **`fast`**. So **`--channel fast`** matches what you built.
+
+The **`fast-3`** name appears in upstream’s **community OperatorHub** publishing scripts (for example `prepare-community-bundle.sh`), which **rename** bundle metadata from `fast` to `fast-3` and use a separate release layout. That is **not** the same path as the standard `make catalog-build` this tooling uses. To use `fast-3` end-to-end you would need to align bundle annotations, catalog template, and `update-catalog-template.sh` with the same channel name—upstream does that in their release automation, not via a single `make` variable alone.
 
 ## Local build (script)
 
@@ -114,7 +131,7 @@ export OPERATOR_GIT_REF=main             # optional upstream ref
 cat build-output.env
 ```
 
-The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), and `VERSION`. It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
+The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), `VERSION`, `OPERATOR_STARTING_CSV`, and `MAAS_DEPLOY_COMMAND` / `MAAS_DEPLOY_SNIPPET`. It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
 
 ### Container commands
 

@@ -111,6 +111,7 @@ jobs:
       version: ${{ steps.export.outputs.version }}
       maas_deploy_command: ${{ steps.export.outputs.maas_deploy_command }}
       maas_deploy_snippet: ${{ steps.export.outputs.maas_deploy_snippet }}
+      operator_starting_csv: ${{ steps.export.outputs.operator_starting_csv }}
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
@@ -175,6 +176,7 @@ jobs:
             echo "bundle_image=${BUNDLE_IMAGE}"
             echo "catalog_image=${CATALOG_IMAGE}"
             echo "version=${VERSION}"
+            echo "operator_starting_csv=${OPERATOR_STARTING_CSV}"
             echo "maas_deploy_command=${MAAS_DEPLOY_COMMAND}"
           } >> "$GITHUB_OUTPUT"
           {
@@ -192,11 +194,11 @@ jobs:
           echo "**Bundle:** \`${BUNDLE_IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Catalog:** \`${CATALOG_IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Job outputs: \`operator_image\`, \`bundle_image\`, \`catalog_image\`, \`version\`, \`maas_deploy_command\`, \`maas_deploy_snippet\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "Job outputs: \`operator_image\`, \`bundle_image\`, \`catalog_image\`, \`version\`, \`operator_starting_csv\`, \`maas_deploy_command\`, \`maas_deploy_snippet\`." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Models-as-a-Service (MaaS) deploy" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "These images are built for the Open Data Hub operator (including the **maas** component). [\`deploy.sh\`](https://github.com/opendatahub-io/maas-billing/blob/main/scripts/deploy.sh) takes **\`--operator-catalog\`** (index image) and **\`--operator-image\`**; the catalog you built already references your **OLM bundle** image below. See [Models-as-a-Service install](https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/)." >> "$GITHUB_STEP_SUMMARY"
+          echo "These images are built for the Open Data Hub operator (including the **maas** component). [\`deploy.sh\`](https://github.com/opendatahub-io/maas-billing/blob/main/scripts/deploy.sh) uses **\`OPERATOR_STARTING_CSV\`** (env), **\`--operator-catalog\`**, **\`--operator-image\`**, and **\`--channel fast\`** (ODH catalog channel). \`operator_starting_csv\` matches the bundle CSV name for this \`version\`. See [Models-as-a-Service install](https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/)." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo '```bash' >> "$GITHUB_STEP_SUMMARY"
           echo "${MAAS_DEPLOY_SNIPPET}" >> "$GITHUB_STEP_SUMMARY"

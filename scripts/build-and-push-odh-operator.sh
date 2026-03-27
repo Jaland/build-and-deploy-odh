@@ -28,9 +28,12 @@
 #   BUILD_OUTPUT_ENV  Path for KEY=value summary (default: <repo>/build-output.env)
 #
 # Optional MaaS / models-as-a-service manifests (upstream get_all_manifests.sh supports --maas=...):
-#   MAAS_MANIFEST_REF   If set, override the maas component (e.g. main, rhoai-3.4, or main@<sha>).
-#                       Use main for the branch tip; see MAAS_MANIFEST_PIN_LATEST for pinning.
-#   MAAS_MANIFEST_PIN_LATEST  If 1/true and MAAS_MANIFEST_REF is main, resolve to main@<current_sha>.
+#   MAAS_MANIFEST_REF   If unset, upstream get_all_manifests.sh uses its baked-in pin (often main@<sha>), NOT latest main.
+#                       Set to main so each run fetches the current tip of main (latest commit at fetch time).
+#                       Set to main@<sha> or use MAAS_MANIFEST_PIN_LATEST to pin an explicit commit.
+#   MAAS_MANIFEST_PIN_LATEST  If 1/true with MAAS_MANIFEST_REF=main, pass main@<sha> where sha is from git ls-remote
+#                       at script start (reproducible; still “current main” for that run).
+#   The on-disk get_all_manifests.sh is NOT modified unless MAAS_MANIFEST_WRITE_FILE=1; overrides are CLI-only.
 #   MAAS_MANIFEST_ORG   GitHub org (default: opendatahub-io)
 #   MAAS_MANIFEST_REPO  Repo name (default: maas-billing; use models-as-a-service or another fork if needed)
 #   MAAS_MANIFEST_SOURCE_PATH  Path inside repo (default: deployment)
@@ -79,6 +82,7 @@ fi
 cd "$CLONE_DIR"
 
 maas_override=""
+MAAS_RESOLVED_REF=""
 
 # Log in once per registry host (operator/bundle and optional catalog may use different repos or hosts).
 login_registry_hosts() {
@@ -141,10 +145,27 @@ maybe_patch_get_all_manifests_file() {
   MAAS_OVERRIDE="$override" perl -i -pe 's/^(\s*\["maas"\]=")[^"]+/$1$ENV{MAAS_OVERRIDE}/' "${f}"
 }
 
+validate_maas_manifests() {
+  [[ -z "${maas_override:-}" ]] && return 0
+  local d="opt/manifests/maas"
+  if [[ ! -d "${d}" ]]; then
+    echo "ERROR: MaaS override was used but ${d} is missing after get_all_manifests.sh" >&2
+    exit 1
+  fi
+  local n
+  n="$(find "${d}" -type f 2>/dev/null | wc -l)"
+  if [[ "${n}" -lt 1 ]]; then
+    echo "ERROR: ${d} exists but contains no files (MaaS fetch may have failed)" >&2
+    exit 1
+  fi
+  echo "Validated MaaS manifests: ${d} (${n} file(s)); ref: ${MAAS_RESOLVED_REF:-unknown}"
+}
+
 if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
   echo "Fetching component manifests (get_all_manifests.sh)..."
   if [[ -n "${MAAS_MANIFEST_REF:-}" ]]; then
     ref_resolved="$(build_maas_manifest_override)"
+    MAAS_RESOLVED_REF="${ref_resolved}"
     org="${MAAS_MANIFEST_ORG:-opendatahub-io}"
     repo="${MAAS_MANIFEST_REPO:-maas-billing}"
     path="${MAAS_MANIFEST_SOURCE_PATH:-deployment}"
@@ -156,6 +177,7 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
   ga_args=()
   [[ -n "${maas_override}" ]] && ga_args+=(--maas="${maas_override}")
   ODH_PLATFORM_TYPE="${ODH_PLATFORM_TYPE}" VERSION="${VERSION_FOR_MANIFESTS}" ./get_all_manifests.sh "${ga_args[@]}"
+  validate_maas_manifests
 else
   echo "Skipping get-manifests"
 fi
@@ -183,10 +205,20 @@ make "${MAKE_ARGS[@]}" BUNDLE_IMGS="${BUNDLE_IMG}" CATALOG_IMG="${CATALOG_IMG}" 
 
 OPERATOR_IMG="${IMAGE_TAG_BASE}:${IMG_TAG}"
 
+# OLM Subscription startingCSV must match the ClusterServiceVersion name in this bundle (see bundle metadata).
+case "${ODH_PLATFORM_TYPE:-OpenDataHub}" in
+  rhoai|RHOAI) OPERATOR_CSV_PACKAGE="rhods-operator" ;;
+  *) OPERATOR_CSV_PACKAGE="opendatahub-operator" ;;
+esac
+OPERATOR_STARTING_CSV="${OPERATOR_CSV_PACKAGE}.v${VERSION_RESOLVED}"
+
 # Models-as-a-Service: https://github.com/opendatahub-io/maas-billing/blob/main/scripts/deploy.sh
-# deploy.sh takes catalog + operator images; the catalog index references the OLM bundle below.
-MAAS_DEPLOY_COMMAND="./scripts/deploy.sh --operator-catalog ${CATALOG_IMG} --operator-image ${OPERATOR_IMG}"
+# deploy.sh reads OPERATOR_STARTING_CSV from the environment (not a flag); optional "-" omits startingCSV.
+# --channel must match the channel name in the built catalog (upstream FBC uses "fast", not derived from VERSION).
+# "fast-3" is an OperatorHub/community naming path; standard make catalog-build stays on "fast".
+MAAS_DEPLOY_COMMAND="OPERATOR_STARTING_CSV='${OPERATOR_STARTING_CSV}' ./scripts/deploy.sh --operator-catalog ${CATALOG_IMG} --operator-image ${OPERATOR_IMG} --channel fast"
 MAAS_DEPLOY_SNIPPET="# OLM bundle image (indexed by the catalog above): ${BUNDLE_IMG}
+# Subscription startingCSV (matches bundle CSV): ${OPERATOR_STARTING_CSV}
 ${MAAS_DEPLOY_COMMAND}"
 
 {
@@ -197,8 +229,10 @@ ${MAAS_DEPLOY_COMMAND}"
   echo "BUNDLE_REPO=${BUNDLE_REPO:-}"
   echo "CATALOG_REPO=${CATALOG_REPO:-}"
   echo "MAAS_OVERRIDE=${maas_override:-}"
+  echo "MAAS_MANIFEST_RESOLVED_REF=${MAAS_RESOLVED_REF:-}"
   echo "IMG_TAG=${IMG_TAG}"
   echo "VERSION=${VERSION_RESOLVED}"
+  echo "OPERATOR_STARTING_CSV=${OPERATOR_STARTING_CSV}"
   # Shell-quote so `source build-output.env` does not treat --flags as commands
   printf 'MAAS_DEPLOY_COMMAND=%q\n' "${MAAS_DEPLOY_COMMAND}"
   printf 'MAAS_DEPLOY_SNIPPET=%q\n' "${MAAS_DEPLOY_SNIPPET}"
@@ -213,6 +247,7 @@ echo "===================================="
 echo ""
 echo "MaaS / Models-as-a-Service deploy (from a maas-billing clone):"
 echo "  # OLM bundle image (indexed by catalog): ${BUNDLE_IMG}"
+echo "  # startingCSV: ${OPERATOR_STARTING_CSV}"
 echo "  ${MAAS_DEPLOY_COMMAND}"
 echo "Docs: https://opendatahub-io.github.io/models-as-a-service/latest/install/maas-setup/"
 
