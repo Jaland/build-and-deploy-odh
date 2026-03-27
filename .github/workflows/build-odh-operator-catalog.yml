@@ -17,7 +17,7 @@
 # Optional MaaS manifest overrides (variables preferred; same-name secrets as fallback):
 #   Default: maas-billing @ main (see script). MAAS_MANIFEST_USE_UPSTREAM_PIN=1 uses upstream get_all_manifests ["maas"] pin instead.
 #   MAAS_MANIFEST_REF, MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_REPO, MAAS_MANIFEST_ORG,
-#   MAAS_MANIFEST_SOURCE_PATH, MAAS_MANIFEST_WRITE_FILE, MAAS_MANIFEST_USE_UPSTREAM_PIN
+#   MAAS_MANIFEST_SOURCE_PATH, MAAS_MANIFEST_SKIP_FILE_PATCH, MAAS_MANIFEST_USE_UPSTREAM_PIN
 #
 # Optional bundle deploy (advanced):
 #   - Set workflow input deploy_bundle to true
@@ -92,8 +92,8 @@ on:
         required: false
         default: ""
         type: string
-      maas_manifest_write_file:
-        description: "Rewrite [\"maas\"] lines in cloned get_all_manifests.sh (debug/visibility)"
+      maas_manifest_skip_file_patch:
+        description: "Do not rewrite get_all_manifests.sh on disk (--maas= only)"
         required: false
         default: false
         type: boolean
@@ -168,7 +168,7 @@ jobs:
           MAAS_MANIFEST_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo != '' && inputs.maas_manifest_repo || vars.MAAS_MANIFEST_REPO || secrets.MAAS_MANIFEST_REPO }}
           MAAS_MANIFEST_ORG: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_org != '' && inputs.maas_manifest_org || vars.MAAS_MANIFEST_ORG || secrets.MAAS_MANIFEST_ORG }}
           MAAS_MANIFEST_SOURCE_PATH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_source_path != '' && inputs.maas_manifest_source_path || vars.MAAS_MANIFEST_SOURCE_PATH || secrets.MAAS_MANIFEST_SOURCE_PATH }}
-          MAAS_MANIFEST_WRITE_FILE: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_write_file == true && '1' || vars.MAAS_MANIFEST_WRITE_FILE || secrets.MAAS_MANIFEST_WRITE_FILE }}
+          MAAS_MANIFEST_SKIP_FILE_PATCH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_skip_file_patch == true && '1' || vars.MAAS_MANIFEST_SKIP_FILE_PATCH || secrets.MAAS_MANIFEST_SKIP_FILE_PATCH }}
           MAAS_MANIFEST_USE_UPSTREAM_PIN: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_use_upstream_pin == true && '1' || vars.MAAS_MANIFEST_USE_UPSTREAM_PIN || secrets.MAAS_MANIFEST_USE_UPSTREAM_PIN }}
         run: ./scripts/build-and-push-odh-operator.sh
 

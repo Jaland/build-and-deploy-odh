@@ -70,11 +70,11 @@ Leave any field empty to keep using the matching **variable** or **secret**.
 | `maas_manifest_pin_latest` | Pin `main` to the current commit (`main@sha`) |
 | `maas_manifest_repo` / `maas_manifest_org` / `maas_manifest_source_path` | Override the matching variable or secret for that run |
 | `maas_manifest_use_upstream_pin` | Use upstream [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) `["maas"]` pin instead of **`--maas=`** **maas-billing** `main` |
-| `maas_manifest_write_file` | Same as variable or secret `MAAS_MANIFEST_WRITE_FILE` |
+| `maas_manifest_skip_file_patch` | Set **`MAAS_MANIFEST_SKIP_FILE_PATCH=1`** — do not rewrite `get_all_manifests.sh` on disk |
 
 ### Optional MaaS (Models-as-a-Service) manifest source
 
-By default the build script passes **`--maas=opendatahub-io:maas-billing:main:deployment`** to upstream [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh), so each run pulls the **current tip of `main`** from [**maas-billing**](https://github.com/opendatahub-io/maas-billing) under `deployment/` — equivalent to an ODH map line **`["maas"]="opendatahub-io:maas-billing:main:deployment"`**. The fetch is driven by the **`--maas=`** CLI override; the **on-disk** `get_all_manifests.sh` in the clone may still show an older `["maas"]=` line until you set **`MAAS_MANIFEST_WRITE_FILE=1`** (optional).
+By default the build script **rewrites the ODH `["maas"]` line in `get_all_manifests.sh` on disk** (only values starting with **`opendatahub-io:`**; the RHOAI block is left unchanged), then passes the same value as **`--maas=`** to [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh). The default is **`opendatahub-io:maas-billing:main:deployment`**, so the file and the fetch match the **current tip of `main`** from [**maas-billing**](https://github.com/opendatahub-io/maas-billing) under `deployment/`. Use **`MAAS_MANIFEST_SKIP_FILE_PATCH=1`** only if you want **`--maas=`** without editing the file.
 
 - **To use upstream’s pinned `["maas"]` in the file instead** (e.g. `main@<sha>`): set **`MAAS_MANIFEST_USE_UPSTREAM_PIN=1`**. Then **`--maas=`** is not passed.
 - **Other repos (e.g. [models-as-a-service](https://github.com/opendatahub-io/models-as-a-service)):** set **`MAAS_MANIFEST_REPO`**, **`MAAS_MANIFEST_ORG`**, **`MAAS_MANIFEST_SOURCE_PATH`** as needed; **`MAAS_MANIFEST_REF`** defaults to **`main`**.
