@@ -189,7 +189,8 @@ MAAS_DEPLOY_COMMAND="./scripts/deploy.sh --operator-catalog ${CATALOG_IMG} --ope
   echo "MAAS_OVERRIDE=${maas_override:-}"
   echo "IMG_TAG=${IMG_TAG}"
   echo "VERSION=${VERSION_RESOLVED}"
-  echo "MAAS_DEPLOY_COMMAND=${MAAS_DEPLOY_COMMAND}"
+  # Shell-quote so `source build-output.env` does not treat --flags as commands
+  printf 'MAAS_DEPLOY_COMMAND=%q\n' "${MAAS_DEPLOY_COMMAND}"
 } | tee "$BUILD_OUTPUT_ENV"
 
 echo ""
