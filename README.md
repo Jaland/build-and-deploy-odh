@@ -37,7 +37,7 @@ Configure under **Settings → Secrets and variables → Actions → Variables**
 | `QUAY_OLM_VERSION` | Optional. OLM bundle/catalog version without a leading `v` (e.g. `3.4.0`). If unset, the upstream Makefile default applies (often `3.3.0`). |
 | `QUAY_BUNDLE_REPO` | Optional. Separate **OLM bundle** image path **without** tag. If unset, bundle is `${QUAY_REPO}-bundle:v$VERSION`. |
 | `QUAY_CATALOG_REPO` | Optional. Separate **catalog** index path **without** tag. If unset, catalog is `${QUAY_REPO}-catalog:v$VERSION`. |
-| `MAAS_MANIFEST_*` | Optional; see workflow. Defaults: **`models-as-a-service`** @ **`main`**. Set **`MAAS_MANIFEST_USE_UPSTREAM_PIN=1`** to use upstream’s pinned maas ref instead. |
+| `MAAS_MANIFEST_*` | Optional; see workflow. Defaults: **`maas-billing`** @ **`main`**. Set **`MAAS_MANIFEST_USE_UPSTREAM_PIN=1`** to use upstream’s `["maas"]` pin in **`get_all_manifests.sh`** instead of **`--maas=`**. |
 
 ### Required repository secrets
 
@@ -69,23 +69,24 @@ Leave any field empty to keep using the matching **variable** or **secret**.
 | `maas_manifest_ref` | Overrides `MAAS_MANIFEST_REF` for that run (default **`main`**) |
 | `maas_manifest_pin_latest` | Pin `main` to the current commit (`main@sha`) |
 | `maas_manifest_repo` / `maas_manifest_org` / `maas_manifest_source_path` | Override the matching variable or secret for that run |
-| `maas_manifest_use_upstream_pin` | Use upstream [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) maas pin instead of **models-as-a-service** `main` |
+| `maas_manifest_use_upstream_pin` | Use upstream [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) `["maas"]` pin instead of **`--maas=`** **maas-billing** `main` |
 | `maas_manifest_write_file` | Same as variable or secret `MAAS_MANIFEST_WRITE_FILE` |
 
 ### Optional MaaS (Models-as-a-Service) manifest source
 
-By default the build script passes **`--maas=opendatahub-io:models-as-a-service:main:deployment`** to upstream `get_all_manifests.sh`, so each run pulls the **current tip of `main`** from [**models-as-a-service**](https://github.com/opendatahub-io/models-as-a-service) (under [`deployment/`](https://github.com/opendatahub-io/models-as-a-service/tree/main/deployment)). No extra Git lookup is required beyond what `get_all_manifests.sh` does when it clones that ref.
+By default the build script passes **`--maas=opendatahub-io:maas-billing:main:deployment`** to upstream [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh), so each run pulls the **current tip of `main`** from [**maas-billing**](https://github.com/opendatahub-io/maas-billing) under `deployment/` — equivalent to an ODH map line **`["maas"]="opendatahub-io:maas-billing:main:deployment"`**. The fetch is driven by the **`--maas=`** CLI override; the **on-disk** `get_all_manifests.sh` in the clone may still show an older `["maas"]=` line until you set **`MAAS_MANIFEST_WRITE_FILE=1`** (optional).
 
-- **To use upstream’s pinned maas ref instead** (the [`["maas"]=…`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) line, e.g. **maas-billing** at a fixed commit for ODH): set **`MAAS_MANIFEST_USE_UPSTREAM_PIN=1`** (repository variable, secret, or workflow input **`maas_manifest_use_upstream_pin`**). Then **`--maas=`** is not passed.
-- **Other branches or commits:** set **`MAAS_MANIFEST_REF`** (e.g. a branch name, or **`main@<sha>`**). Default ref is **`main`**.
-- **Reproducible snapshot of `main`:** set **`MAAS_MANIFEST_PIN_LATEST=1`** with **`MAAS_MANIFEST_REF=main`** (resolves to `main@<sha>` via `git ls-remote` at the start of the build).
-- **Fork or path:** set **`MAAS_MANIFEST_ORG`**, **`MAAS_MANIFEST_REPO`**, or **`MAAS_MANIFEST_SOURCE_PATH`** as needed.
+- **To use upstream’s pinned `["maas"]` in the file instead** (e.g. `main@<sha>`): set **`MAAS_MANIFEST_USE_UPSTREAM_PIN=1`**. Then **`--maas=`** is not passed.
+- **Other repos (e.g. [models-as-a-service](https://github.com/opendatahub-io/models-as-a-service)):** set **`MAAS_MANIFEST_REPO`**, **`MAAS_MANIFEST_ORG`**, **`MAAS_MANIFEST_SOURCE_PATH`** as needed; **`MAAS_MANIFEST_REF`** defaults to **`main`**.
+- **Reproducible snapshot of `main`:** **`MAAS_MANIFEST_PIN_LATEST=1`** with **`MAAS_MANIFEST_REF=main`** (resolves to `main@<sha>` via `git ls-remote`).
 
-After a successful fetch with **`--maas=`** (the default path), the build script **checks** that `opt/manifests/maas` exists and contains at least one file, and writes **`MAAS_MANIFEST_RESOLVED_REF`** to `build-output.env`.
+After **`get_all_manifests.sh`**, the build writes **`manifest-validation/get_all_manifests.sh`** (copy of the upstream map file) and **`manifest-validation/maas-fetch-effective.txt`** (effective **`--maas=`**). The GitHub workflow uploads those as artifact **`get-all-manifests-validation`**. **`build-output.env`** includes **`MANIFEST_VALIDATION_DIR`**.
 
-**`ODH_PLATFORM_TYPE=rhoai`** is still supported for the RHOAI manifest map; the same default **`--maas=`** applies unless **`MAAS_MANIFEST_USE_UPSTREAM_PIN=1`** (useful if you want the RHOAI upstream maas pin instead).
+After a successful fetch with **`--maas=`** (the default path), the script **checks** that `opt/manifests/maas` exists and contains at least one file, and writes **`MAAS_MANIFEST_RESOLVED_REF`** to `build-output.env`.
 
-**If a Role or ClusterRole is still wrong after a build:** confirm you did not set **`MAAS_MANIFEST_USE_UPSTREAM_PIN`**, then rebuild the operator, bundle, and catalog and reinstall from the new catalog.
+**`ODH_PLATFORM_TYPE=rhoai`** uses the RHOAI manifest map; the same default **`--maas=`** applies unless **`MAAS_MANIFEST_USE_UPSTREAM_PIN=1`**.
+
+**If a Role or ClusterRole is still wrong after a build:** confirm **`maas-fetch-effective.txt`** shows the expected **`MAAS_OVERRIDE`**, then rebuild the operator, bundle, and catalog and reinstall from the new catalog.
 
 ### Where to find the image references
 
@@ -93,7 +94,7 @@ After a successful run:
 
 - **Job summary** on the workflow run lists operator, bundle, and catalog image URLs, plus a **Models-as-a-Service deploy** section with the exact `./scripts/deploy.sh` command (same as below).
 - **Job outputs:** `operator_image`, `bundle_image`, `catalog_image`, `version`, `operator_starting_csv`, `maas_deploy_command`, `maas_deploy_snippet` (comments + `deploy.sh` line, including your **bundle** image when using a custom `BUNDLE_REPO`).
-- **Artifact:** `build-output-env` (includes `OPERATOR_STARTING_CSV`, `MAAS_DEPLOY_COMMAND`, `MAAS_DEPLOY_SNIPPET`, and `BUNDLE_IMAGE`).
+- **Artifacts:** `build-output-env` (includes `OPERATOR_STARTING_CSV`, `MAAS_DEPLOY_COMMAND`, `MAAS_DEPLOY_SNIPPET`, `BUNDLE_IMAGE`, `MANIFEST_VALIDATION_DIR`); **`get-all-manifests-validation`** (`manifest-validation/get_all_manifests.sh`, `maas-fetch-effective.txt`).
 
 ### Why does the log show `***` instead of image names?
 
@@ -135,7 +136,7 @@ export OPERATOR_GIT_REF=main             # optional upstream ref
 cat build-output.env
 ```
 
-The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), `VERSION`, `OPERATOR_STARTING_CSV`, and `MAAS_DEPLOY_COMMAND` / `MAAS_DEPLOY_SNIPPET`. It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
+The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), `VERSION`, `OPERATOR_STARTING_CSV`, `MANIFEST_VALIDATION_DIR` (unless get-manifests was skipped), and `MAAS_DEPLOY_COMMAND` / `MAAS_DEPLOY_SNIPPET`. Unless **`SKIP_GET_MANIFESTS=1`**, it also writes **`manifest-validation/`** (`get_all_manifests.sh` copy, **`maas-fetch-effective.txt`**). It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
 
 ### Container commands
 

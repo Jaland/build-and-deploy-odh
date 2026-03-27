@@ -3,3 +3,6 @@
 
 # CI summary written by scripts/build-and-push-odh-operator.sh
 /build-output.env
+
+# Copied get_all_manifests.sh + maas-fetch-effective.txt for validation
+/manifest-validation/

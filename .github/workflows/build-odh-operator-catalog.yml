@@ -15,7 +15,7 @@
 #   QUAY_PASSWORD — Quay.io password or robot token
 #
 # Optional MaaS manifest overrides (variables preferred; same-name secrets as fallback):
-#   Default: models-as-a-service @ main (see script). MAAS_MANIFEST_USE_UPSTREAM_PIN=1 uses upstream get_all_manifests pin instead.
+#   Default: maas-billing @ main (see script). MAAS_MANIFEST_USE_UPSTREAM_PIN=1 uses upstream get_all_manifests ["maas"] pin instead.
 #   MAAS_MANIFEST_REF, MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_REPO, MAAS_MANIFEST_ORG,
 #   MAAS_MANIFEST_SOURCE_PATH, MAAS_MANIFEST_WRITE_FILE, MAAS_MANIFEST_USE_UPSTREAM_PIN
 #
@@ -98,7 +98,7 @@ on:
         default: false
         type: boolean
       maas_manifest_use_upstream_pin:
-        description: "Use upstream opendatahub-operator pinned maas (skip models-as-a-service main)"
+        description: "Use upstream get_all_manifests.sh [\"maas\"] pin (skip --maas= maas-billing main)"
         required: false
         default: false
         type: boolean
@@ -217,3 +217,10 @@ jobs:
           name: build-output-env
           path: build-output.env
           if-no-files-found: error
+
+      - name: Upload get_all_manifests validation (map + effective MaaS fetch)
+        uses: actions/upload-artifact@v4
+        with:
+          name: get-all-manifests-validation
+          path: manifest-validation/
+          if-no-files-found: warn
