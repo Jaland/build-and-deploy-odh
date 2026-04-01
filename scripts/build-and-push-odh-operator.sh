@@ -40,18 +40,11 @@
 #   Before ./get_all_manifests.sh, the ODH ["maas"] line in get_all_manifests.sh is rewritten on disk to match
 #   the same org:repo:ref:path as --maas= (only lines with value starting opendatahub-io: — RHOAI block unchanged).
 #   MAAS_MANIFEST_SKIP_FILE_PATCH  If 1/true, skip that rewrite (CLI --maas= only).
-#   MAAS_MANIFEST_ORG   GitHub org (default: opendatahub-io)
-#   MAAS_MANIFEST_REPO  Repo name (default: maas-billing; e.g. models-as-a-service for that upstream repo)
-#   MAAS_MANIFEST_SOURCE_PATH  Path inside repo (default: deployment)
-#   MAAS_MANIFEST_REPO_URL  Optional. Sets org/repo (and optionally branch) from a GitHub URL so you do not
-#                       have to set MAAS_MANIFEST_ORG / MAAS_MANIFEST_REPO separately. Examples:
-#                         https://github.com/opendatahub-io/models-as-a-service
-#                         https://github.com/opendatahub-io/models-as-a-service/tree/main
-#                         git@github.com:opendatahub-io/models-as-a-service.git
-#                       If MAAS_MANIFEST_REF is already set, it wins over the branch in a .../tree/branch URL.
-#   MAAS_MANIFEST_GIT_BASE_URL  Optional. If set, patch get_all_manifests.sh GITHUB_URL before fetch (e.g.
-#                       https://github.enterprise.example.com for a mirror). Applies to ALL components in
-#                       get_all_manifests.sh, not only MaaS. Also used for MAAS_MANIFEST_PIN_LATEST ls-remote.
+#   MaaS --maas=org:repo:ref:path (see upstream get_all_manifests.sh). Defaults:
+#   MAAS_MANIFEST_ORG         opendatahub-io
+#   MAAS_MANIFEST_REPO        maas-billing
+#   MAAS_MANIFEST_REF         main   (branch, tag, or main@sha)
+#   MAAS_MANIFEST_SOURCE_PATH deployment
 #   ODH_PLATFORM_TYPE   OpenDataHub (default) or rhoai — selects which base manifest map is used before override
 #
 set -euo pipefail
@@ -118,57 +111,10 @@ if [[ -n "${VERSION:-}" ]]; then
 fi
 
 # Upstream: https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh
-# Optional --maas=org:repo:ref:path overrides the pinned maas-billing (or other) revision without editing the file.
-apply_maas_manifest_repo_url() {
-  [[ -z "${MAAS_MANIFEST_REPO_URL:-}" ]] && return 0
-  local url="${MAAS_MANIFEST_REPO_URL}"
-  url="${url#"${url%%[![:space:]]*}"}"
-  url="${url%%[[:space:]]*}"
-  local org="" repo="" ref_from_url=""
-
-  local saved_ref="${MAAS_MANIFEST_REF-}"
-
-  if [[ "$url" =~ ^https://github\.com/([^/]+)/([^/]+)/tree/([^?#]+) ]]; then
-    org="${BASH_REMATCH[1]}"
-    repo="${BASH_REMATCH[2]}"
-    ref_from_url="${BASH_REMATCH[3]}"
-    ref_from_url="${ref_from_url%/}"
-  elif [[ "$url" =~ ^https://github\.com/([^/]+)/([^/?#]+)(\.git)?/?([?#].*)?$ ]]; then
-    org="${BASH_REMATCH[1]}"
-    repo="${BASH_REMATCH[2]}"
-    repo="${repo%.git}"
-  elif [[ "$url" =~ ^git@github\.com:([^/]+)/([^/]+?)(\.git)?$ ]]; then
-    org="${BASH_REMATCH[1]}"
-    repo="${BASH_REMATCH[2]}"
-    repo="${repo%.git}"
-  else
-    echo "ERROR: MAAS_MANIFEST_REPO_URL must be https://github.com/org/repo, https://github.com/org/repo/tree/branch, or git@github.com:org/repo.git" >&2
-    return 1
-  fi
-
-  export MAAS_MANIFEST_ORG="${org}"
-  export MAAS_MANIFEST_REPO="${repo}"
-  # Branch: explicit MAAS_MANIFEST_REF wins over .../tree/branch in URL
-  if [[ -n "${saved_ref}" ]]; then
-    export MAAS_MANIFEST_REF="${saved_ref}"
-  elif [[ -n "${ref_from_url}" ]]; then
-    export MAAS_MANIFEST_REF="${ref_from_url}"
-  fi
-  echo "MaaS manifest repo from MAAS_MANIFEST_REPO_URL: org=${org} repo=${repo} ref=${MAAS_MANIFEST_REF:-main}"
-}
-
-patch_get_all_manifests_github_url() {
-  [[ -z "${MAAS_MANIFEST_GIT_BASE_URL:-}" ]] && return 0
-  local f="get_all_manifests.sh"
-  [[ -f "${f}" ]] || return 0
-  echo "Patching ${f} GITHUB_URL to MAAS_MANIFEST_GIT_BASE_URL=${MAAS_MANIFEST_GIT_BASE_URL} (all components use this base)."
-  GITHUB_URL_VAL="${MAAS_MANIFEST_GIT_BASE_URL}" perl -i -pe 's/^GITHUB_URL=.*/GITHUB_URL="$ENV{GITHUB_URL_VAL}"/' "${f}"
-}
-
+# Optional --maas=org:repo:ref:path overrides the default opendatahub-io:maas-billing:main:deployment.
 resolve_branch_head_sha() {
   local org="$1" repo="$2" branch="$3"
-  local base="${MAAS_MANIFEST_GIT_BASE_URL:-https://github.com}"
-  git ls-remote "${base}/${org}/${repo}.git" "refs/heads/${branch}" 2>/dev/null | awk '{print $1}'
+  git ls-remote "https://github.com/${org}/${repo}.git" "refs/heads/${branch}" 2>/dev/null | awk '{print $1}'
 }
 
 build_maas_manifest_override() {
@@ -184,7 +130,7 @@ build_maas_manifest_override() {
     local sha
     sha="$(resolve_branch_head_sha "${org}" "${repo}" "main")"
     if [[ -z "${sha}" ]]; then
-      echo "ERROR: could not resolve latest commit for ${MAAS_MANIFEST_GIT_BASE_URL:-https://github.com}/${org}/${repo} branch main" >&2
+      echo "ERROR: could not resolve latest commit for https://github.com/${org}/${repo} branch main" >&2
       exit 1
     fi
     echo "${ref}@${sha}"
@@ -224,11 +170,6 @@ validate_maas_manifests() {
 
 if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
   echo "Fetching component manifests (get_all_manifests.sh)..."
-  # URL-based org/repo/branch is only used when we pass --maas= (not with MAAS_MANIFEST_USE_UPSTREAM_PIN).
-  if [[ "${MAAS_MANIFEST_USE_UPSTREAM_PIN:-}" != "1" && "${MAAS_MANIFEST_USE_UPSTREAM_PIN:-}" != "true" ]]; then
-    apply_maas_manifest_repo_url || exit 1
-  fi
-  patch_get_all_manifests_github_url
   if [[ "${MAAS_MANIFEST_USE_UPSTREAM_PIN:-}" == "1" || "${MAAS_MANIFEST_USE_UPSTREAM_PIN:-}" == "true" ]]; then
     echo "NOTE: MAAS_MANIFEST_USE_UPSTREAM_PIN=1 — using the [\"maas\"] pin in upstream get_all_manifests.sh (not --maas=opendatahub-io:maas-billing:main:deployment)."
   else
@@ -238,7 +179,7 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
     repo="${MAAS_MANIFEST_REPO:-maas-billing}"
     path="${MAAS_MANIFEST_SOURCE_PATH:-deployment}"
     maas_override="${org}:${repo}:${ref_resolved}:${path}"
-    echo "MaaS manifests: ${MAAS_MANIFEST_GIT_BASE_URL:-https://github.com}/${org}/${repo} @ ${ref_resolved} (path: ${path}/) — --maas=${maas_override}"
+    echo "MaaS manifests: https://github.com/${org}/${repo} @ ${ref_resolved} (path: ${path}/) — --maas=${maas_override}"
     apply_maas_line_to_get_all_manifests_file "${maas_override}"
   fi
   VERSION_FOR_MANIFESTS="$(make "${MAKE_ARGS[@]}" -s print-VERSION 2>/dev/null || true)"
@@ -260,8 +201,6 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
     if [[ -n "${maas_override:-}" ]]; then
       echo "MAAS_OVERRIDE=${maas_override}"
       echo "GET_ALL_MANIFESTS_ARG=--maas=${maas_override}"
-      [[ -n "${MAAS_MANIFEST_REPO_URL:-}" ]] && echo "MAAS_MANIFEST_REPO_URL=${MAAS_MANIFEST_REPO_URL}"
-      [[ -n "${MAAS_MANIFEST_GIT_BASE_URL:-}" ]] && echo "MAAS_MANIFEST_GIT_BASE_URL=${MAAS_MANIFEST_GIT_BASE_URL}"
     else
       echo "MAAS_OVERRIDE="
       echo "GET_ALL_MANIFESTS_ARG=(none — MAAS_MANIFEST_USE_UPSTREAM_PIN=1; upstream [\"maas\"] in get_all_manifests.sh applies)"

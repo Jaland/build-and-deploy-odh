@@ -14,11 +14,11 @@
 #   QUAY_USERNAME — Quay.io username or robot account name
 #   QUAY_PASSWORD — Quay.io password or robot token
 #
-# Optional MaaS manifest overrides (variables preferred; same-name secrets as fallback):
-#   Default: maas-billing @ main (see script). MAAS_MANIFEST_USE_UPSTREAM_PIN=1 uses upstream get_all_manifests ["maas"] pin instead.
-#   MAAS_MANIFEST_REF, MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_REPO, MAAS_MANIFEST_ORG,
-#   MAAS_MANIFEST_REPO_URL, MAAS_MANIFEST_GIT_BASE_URL,
-#   MAAS_MANIFEST_SOURCE_PATH, MAAS_MANIFEST_SKIP_FILE_PATCH, MAAS_MANIFEST_USE_UPSTREAM_PIN
+# Optional MaaS manifest overrides (variables preferred; same-name secrets as fallback).
+#   Together they form --maas=org:repo:ref:path passed to get_all_manifests.sh. Defaults:
+#   opendatahub-io : maas-billing : main : deployment
+#   MAAS_MANIFEST_ORG, MAAS_MANIFEST_REPO, MAAS_MANIFEST_REF, MAAS_MANIFEST_SOURCE_PATH,
+#   MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_SKIP_FILE_PATCH, MAAS_MANIFEST_USE_UPSTREAM_PIN
 #
 # Optional bundle deploy (advanced):
 #   - Set workflow input deploy_bundle to true
@@ -68,48 +68,38 @@ on:
         required: false
         default: false
         type: boolean
-      maas_manifest_ref:
-        description: "Override maas manifests ref (empty = variable or secret MAAS_MANIFEST_REF)"
-        required: false
-        default: ""
-        type: string
-      maas_manifest_pin_latest:
-        description: "Pin main to current commit (main@sha); needs MAAS_MANIFEST_REF=main"
-        required: false
-        default: false
-        type: boolean
-      maas_manifest_repo:
-        description: "GitHub repo name for maas manifests (empty = variable or secret MAAS_MANIFEST_REPO)"
-        required: false
-        default: ""
-        type: string
       maas_manifest_org:
-        description: "GitHub org (empty = variable or secret MAAS_MANIFEST_ORG)"
+        description: "MAAS_MANIFEST_ORG — segment 1 of --maas=org:repo:ref:path. Default opendatahub-io. Empty = variable/secret MAAS_MANIFEST_ORG."
         required: false
         default: ""
         type: string
-      maas_manifest_repo_url:
-        description: "GitHub repo URL for MaaS manifests — sets org/repo (and optional branch from .../tree/branch); overrides org/repo inputs (empty = variable or secret MAAS_MANIFEST_REPO_URL)"
+      maas_manifest_repo:
+        description: "MAAS_MANIFEST_REPO — segment 2. Default maas-billing. Empty = variable/secret MAAS_MANIFEST_REPO."
         required: false
         default: ""
         type: string
-      maas_manifest_git_base_url:
-        description: "Override GITHUB_URL in get_all_manifests.sh for all components (e.g. GitHub Enterprise mirror); empty = variable or secret MAAS_MANIFEST_GIT_BASE_URL"
+      maas_manifest_ref:
+        description: "MAAS_MANIFEST_REF — segment 3 (branch, tag, or main@sha). Default main. Empty = variable/secret MAAS_MANIFEST_REF."
         required: false
         default: ""
         type: string
       maas_manifest_source_path:
-        description: "Path inside repo (empty = variable or secret MAAS_MANIFEST_SOURCE_PATH)"
+        description: "MAAS_MANIFEST_SOURCE_PATH — segment 4 (folder in repo). Default deployment. Empty = variable/secret MAAS_MANIFEST_SOURCE_PATH."
         required: false
         default: ""
         type: string
+      maas_manifest_pin_latest:
+        description: "MAAS_MANIFEST_PIN_LATEST — pin main to main@<sha> (requires ref main). Default off."
+        required: false
+        default: false
+        type: boolean
       maas_manifest_skip_file_patch:
-        description: "Do not rewrite get_all_manifests.sh on disk (--maas= only)"
+        description: "MAAS_MANIFEST_SKIP_FILE_PATCH — do not rewrite get_all_manifests.sh on disk. Default off."
         required: false
         default: false
         type: boolean
       maas_manifest_use_upstream_pin:
-        description: "Use upstream get_all_manifests.sh [\"maas\"] pin (skip --maas= maas-billing main)"
+        description: "MAAS_MANIFEST_USE_UPSTREAM_PIN — use upstream [\"maas\"] pin only (no --maas=). Default off."
         required: false
         default: false
         type: boolean
@@ -174,13 +164,11 @@ jobs:
           QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
           DEPLOY_BUNDLE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_bundle == true && '1' || '0' }}
           BUILD_OUTPUT_ENV: ${{ github.workspace }}/build-output.env
-          MAAS_MANIFEST_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_ref != '' && inputs.maas_manifest_ref || vars.MAAS_MANIFEST_REF || secrets.MAAS_MANIFEST_REF }}
-          MAAS_MANIFEST_PIN_LATEST: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_pin_latest == true && '1' || vars.MAAS_MANIFEST_PIN_LATEST || secrets.MAAS_MANIFEST_PIN_LATEST }}
-          MAAS_MANIFEST_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo != '' && inputs.maas_manifest_repo || vars.MAAS_MANIFEST_REPO || secrets.MAAS_MANIFEST_REPO }}
           MAAS_MANIFEST_ORG: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_org != '' && inputs.maas_manifest_org || vars.MAAS_MANIFEST_ORG || secrets.MAAS_MANIFEST_ORG }}
-          MAAS_MANIFEST_REPO_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo_url != '' && inputs.maas_manifest_repo_url || vars.MAAS_MANIFEST_REPO_URL || secrets.MAAS_MANIFEST_REPO_URL }}
-          MAAS_MANIFEST_GIT_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_git_base_url != '' && inputs.maas_manifest_git_base_url || vars.MAAS_MANIFEST_GIT_BASE_URL || secrets.MAAS_MANIFEST_GIT_BASE_URL }}
+          MAAS_MANIFEST_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo != '' && inputs.maas_manifest_repo || vars.MAAS_MANIFEST_REPO || secrets.MAAS_MANIFEST_REPO }}
+          MAAS_MANIFEST_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_ref != '' && inputs.maas_manifest_ref || vars.MAAS_MANIFEST_REF || secrets.MAAS_MANIFEST_REF }}
           MAAS_MANIFEST_SOURCE_PATH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_source_path != '' && inputs.maas_manifest_source_path || vars.MAAS_MANIFEST_SOURCE_PATH || secrets.MAAS_MANIFEST_SOURCE_PATH }}
+          MAAS_MANIFEST_PIN_LATEST: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_pin_latest == true && '1' || vars.MAAS_MANIFEST_PIN_LATEST || secrets.MAAS_MANIFEST_PIN_LATEST }}
           MAAS_MANIFEST_SKIP_FILE_PATCH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_skip_file_patch == true && '1' || vars.MAAS_MANIFEST_SKIP_FILE_PATCH || secrets.MAAS_MANIFEST_SKIP_FILE_PATCH }}
           MAAS_MANIFEST_USE_UPSTREAM_PIN: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_use_upstream_pin == true && '1' || vars.MAAS_MANIFEST_USE_UPSTREAM_PIN || secrets.MAAS_MANIFEST_USE_UPSTREAM_PIN }}
         run: ./scripts/build-and-push-odh-operator.sh
