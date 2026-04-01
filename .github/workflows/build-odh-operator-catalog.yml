@@ -17,6 +17,7 @@
 # Optional MaaS manifest overrides (variables preferred; same-name secrets as fallback):
 #   Default: maas-billing @ main (see script). MAAS_MANIFEST_USE_UPSTREAM_PIN=1 uses upstream get_all_manifests ["maas"] pin instead.
 #   MAAS_MANIFEST_REF, MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_REPO, MAAS_MANIFEST_ORG,
+#   MAAS_MANIFEST_REPO_URL, MAAS_MANIFEST_GIT_BASE_URL,
 #   MAAS_MANIFEST_SOURCE_PATH, MAAS_MANIFEST_SKIP_FILE_PATCH, MAAS_MANIFEST_USE_UPSTREAM_PIN
 #
 # Optional bundle deploy (advanced):
@@ -84,6 +85,16 @@ on:
         type: string
       maas_manifest_org:
         description: "GitHub org (empty = variable or secret MAAS_MANIFEST_ORG)"
+        required: false
+        default: ""
+        type: string
+      maas_manifest_repo_url:
+        description: "GitHub repo URL for MaaS manifests — sets org/repo (and optional branch from .../tree/branch); overrides org/repo inputs (empty = variable or secret MAAS_MANIFEST_REPO_URL)"
+        required: false
+        default: ""
+        type: string
+      maas_manifest_git_base_url:
+        description: "Override GITHUB_URL in get_all_manifests.sh for all components (e.g. GitHub Enterprise mirror); empty = variable or secret MAAS_MANIFEST_GIT_BASE_URL"
         required: false
         default: ""
         type: string
@@ -167,6 +178,8 @@ jobs:
           MAAS_MANIFEST_PIN_LATEST: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_pin_latest == true && '1' || vars.MAAS_MANIFEST_PIN_LATEST || secrets.MAAS_MANIFEST_PIN_LATEST }}
           MAAS_MANIFEST_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo != '' && inputs.maas_manifest_repo || vars.MAAS_MANIFEST_REPO || secrets.MAAS_MANIFEST_REPO }}
           MAAS_MANIFEST_ORG: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_org != '' && inputs.maas_manifest_org || vars.MAAS_MANIFEST_ORG || secrets.MAAS_MANIFEST_ORG }}
+          MAAS_MANIFEST_REPO_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo_url != '' && inputs.maas_manifest_repo_url || vars.MAAS_MANIFEST_REPO_URL || secrets.MAAS_MANIFEST_REPO_URL }}
+          MAAS_MANIFEST_GIT_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_git_base_url != '' && inputs.maas_manifest_git_base_url || vars.MAAS_MANIFEST_GIT_BASE_URL || secrets.MAAS_MANIFEST_GIT_BASE_URL }}
           MAAS_MANIFEST_SOURCE_PATH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_source_path != '' && inputs.maas_manifest_source_path || vars.MAAS_MANIFEST_SOURCE_PATH || secrets.MAAS_MANIFEST_SOURCE_PATH }}
           MAAS_MANIFEST_SKIP_FILE_PATCH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_skip_file_patch == true && '1' || vars.MAAS_MANIFEST_SKIP_FILE_PATCH || secrets.MAAS_MANIFEST_SKIP_FILE_PATCH }}
           MAAS_MANIFEST_USE_UPSTREAM_PIN: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_use_upstream_pin == true && '1' || vars.MAAS_MANIFEST_USE_UPSTREAM_PIN || secrets.MAAS_MANIFEST_USE_UPSTREAM_PIN }}

@@ -69,6 +69,8 @@ Leave any field empty to keep using the matching **variable** or **secret**.
 | `maas_manifest_ref` | Overrides `MAAS_MANIFEST_REF` for that run (default **`main`**) |
 | `maas_manifest_pin_latest` | Pin `main` to the current commit (`main@sha`) |
 | `maas_manifest_repo` / `maas_manifest_org` / `maas_manifest_source_path` | Override the matching variable or secret for that run |
+| `maas_manifest_repo_url` | GitHub URL for the MaaS manifests repo — sets org/repo (and optional branch from `.../tree/branch`); overrides org/repo for that run |
+| `maas_manifest_git_base_url` | Base URL patched into upstream `get_all_manifests.sh` as `GITHUB_URL` for **all** component fetches (e.g. GitHub Enterprise mirror) |
 | `maas_manifest_use_upstream_pin` | Use upstream [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) `["maas"]` pin instead of **`--maas=`** **maas-billing** `main` |
 | `maas_manifest_skip_file_patch` | Set **`MAAS_MANIFEST_SKIP_FILE_PATCH=1`** — do not rewrite `get_all_manifests.sh` on disk |
 
@@ -77,7 +79,8 @@ Leave any field empty to keep using the matching **variable** or **secret**.
 By default the build script **rewrites the ODH `["maas"]` line in `get_all_manifests.sh` on disk** (only values starting with **`opendatahub-io:`**; the RHOAI block is left unchanged), then passes the same value as **`--maas=`** to [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh). The default is **`opendatahub-io:maas-billing:main:deployment`**, so the file and the fetch match the **current tip of `main`** from [**maas-billing**](https://github.com/opendatahub-io/maas-billing) under `deployment/`. Use **`MAAS_MANIFEST_SKIP_FILE_PATCH=1`** only if you want **`--maas=`** without editing the file.
 
 - **To use upstream’s pinned `["maas"]` in the file instead** (e.g. `main@<sha>`): set **`MAAS_MANIFEST_USE_UPSTREAM_PIN=1`**. Then **`--maas=`** is not passed.
-- **Other repos (e.g. [models-as-a-service](https://github.com/opendatahub-io/models-as-a-service)):** set **`MAAS_MANIFEST_REPO`**, **`MAAS_MANIFEST_ORG`**, **`MAAS_MANIFEST_SOURCE_PATH`** as needed; **`MAAS_MANIFEST_REF`** defaults to **`main`**.
+- **Other repos (e.g. [models-as-a-service](https://github.com/opendatahub-io/models-as-a-service)):** set **`MAAS_MANIFEST_REPO`**, **`MAAS_MANIFEST_ORG`**, **`MAAS_MANIFEST_SOURCE_PATH`** as needed; **`MAAS_MANIFEST_REF`** defaults to **`main`**. Alternatively set **`MAAS_MANIFEST_REPO_URL`** to a GitHub HTTPS or `git@github.com:` URL (optional **`.../tree/<branch>`** for the branch). If **`MAAS_MANIFEST_REF`** is also set, it overrides the branch from the URL.
+- **Git host mirror (advanced):** **`MAAS_MANIFEST_GIT_BASE_URL`** rewrites upstream **`GITHUB_URL`** in **`get_all_manifests.sh`** before fetch so **every** component clones from that base (not only MaaS). Use when mirrors live under the same `base/org/repo` layout as github.com.
 - **Reproducible snapshot of `main`:** **`MAAS_MANIFEST_PIN_LATEST=1`** with **`MAAS_MANIFEST_REF=main`** (resolves to `main@<sha>` via `git ls-remote`).
 
 After **`get_all_manifests.sh`**, the build writes **`manifest-validation/get_all_manifests.sh`** (copy of the upstream map file) and **`manifest-validation/maas-fetch-effective.txt`** (effective **`--maas=`**). The GitHub workflow uploads those as artifact **`get-all-manifests-validation`**. **`build-output.env`** includes **`MANIFEST_VALIDATION_DIR`**.
