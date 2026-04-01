@@ -14,9 +14,22 @@ The script always builds and pushes the **operator** image, the OLM **bundle** i
 
 **Tag column:** `<tag>` is **`v$VERSION`** by default (same **`VERSION`** as the OLM bundle metadata). If **`UNIFIED_IMAGE_TAG`** is set (`QUAY_UNIFIED_IMAGE_TAG` / workflow **`unified_image_tag`**), **operator**, **bundle**, and **catalog** all use that **same** tag string instead.
 
+**Unified tag (`QUAY_UNIFIED_IMAGE_TAG`) — one value, no extra OLM version needed**
+
+When **`UNIFIED_IMAGE_TAG`** is set, the script **derives** **`VERSION`** for the Makefile / CSV from that tag so the bundle and file-based catalog stay consistent (upstream catalog tooling names bundles from the bundle image tag; it must match **`opendatahub-operator.vX.Y.Z`** in the CSV).
+
+| You set | Images use | Makefile `VERSION` / CSV |
+|--------|------------|---------------------------|
+| `v3.4.0` | `v3.4.0` | `3.4.0` |
+| `3.4.0` | **`v3.4.0`** (normalized) | `3.4.0` |
+
+Accepted forms: **`vX.Y.Z`** or **`X.Y.Z`** (optional patch segment). Arbitrary strings (e.g. `my-branch`) are **rejected** — they break OLM semver and catalog validation.
+
+If **`UNIFIED_IMAGE_TAG`** is set, **`QUAY_OLM_VERSION`** / **`VERSION`** from the environment is **not** used (the unified tag is the single source of truth). Omit **`UNIFIED_IMAGE_TAG`** when you want **`QUAY_OLM_VERSION`** alone to drive **`VERSION`**.
+
 **Versions:**
 
-- **`VERSION`** (from **`QUAY_OLM_VERSION`**, workflow **`version`**, or the [upstream Makefile](https://github.com/opendatahub-io/opendatahub-operator/blob/main/Makefile) default) drives **`make`** and the **CSV** / **`OPERATOR_STARTING_CSV`**. Bundle and catalog **image** tags are **`v$VERSION`** unless **`UNIFIED_IMAGE_TAG`** is set.
+- **`VERSION`** (from **`QUAY_OLM_VERSION`**, workflow **`version`**, or the [upstream Makefile](https://github.com/opendatahub-io/opendatahub-operator/blob/main/Makefile) default) drives **`make`** and the **CSV** / **`OPERATOR_STARTING_CSV`** when **`UNIFIED_IMAGE_TAG`** is **unset**. Bundle and catalog **image** tags are **`v$VERSION`** unless **`UNIFIED_IMAGE_TAG`** is set.
 - **`IMG_TAG`** (from **`QUAY_TAG`** or **`img_tag`**) is the **operator** tag when **`UNIFIED_IMAGE_TAG`** is unset (default **`latest`**). When **`UNIFIED_IMAGE_TAG`** is set, it replaces **`IMG_TAG`** and is also used for bundle and catalog image tags.
 
 ## GitHub Actions
@@ -36,8 +49,8 @@ Configure under **Settings → Secrets and variables → Actions → Variables**
 |----------|---------|
 | `QUAY_REPO` | Operator image path **without** tag (e.g. `quay.io/myorg/opendatahub-operator`) |
 | `QUAY_TAG` | Operator image tag when **`QUAY_UNIFIED_IMAGE_TAG`** is unset. Default **`latest`**. |
-| `QUAY_UNIFIED_IMAGE_TAG` | Optional. One tag for **operator**, **bundle**, and **catalog** images (e.g. `build-42`). When set, overrides **`QUAY_TAG`** for the operator and replaces **`v$VERSION`** tags on bundle/catalog. |
-| `QUAY_OLM_VERSION` | Optional. OLM **`VERSION`** without a leading **`v`** (e.g. `3.4.0`). Drives Makefile/CSV; bundle/catalog **image** tags stay **`v$VERSION`** unless **`QUAY_UNIFIED_IMAGE_TAG`** is set. |
+| `QUAY_UNIFIED_IMAGE_TAG` | Optional. One tag for **operator**, **bundle**, and **catalog** — **`vX.Y.Z`** or **`X.Y.Z`**. Derives Makefile **`VERSION`** automatically; images use **`vX.Y.Z`** (bare semver is normalized). Overrides **`QUAY_TAG`** and **`QUAY_OLM_VERSION`** when set. |
+| `QUAY_OLM_VERSION` | Optional. OLM **`VERSION`** without a leading **`v`** (e.g. `3.4.0`). Used only when **`QUAY_UNIFIED_IMAGE_TAG`** is unset. |
 | `QUAY_BUNDLE_REPO` | Optional. Separate **OLM bundle** image path **without** tag. If unset, bundle is `${QUAY_REPO}-bundle:<tag>`. |
 | `QUAY_CATALOG_REPO` | Optional. Separate **catalog** index path **without** tag. If unset, catalog is `${QUAY_REPO}-catalog:<tag>`. |
 | `MAAS_MANIFEST_ORG` | Optional. Segment 1 of **`--maas=org:repo:ref:path`**. Default **`opendatahub-io`**. |

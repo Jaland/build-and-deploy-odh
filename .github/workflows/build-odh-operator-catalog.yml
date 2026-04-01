@@ -8,8 +8,8 @@
 #     If unset, bundle is ${QUAY_REPO}-bundle:v$VERSION
 #   QUAY_CATALOG_REPO — Optional catalog index path without tag
 #   QUAY_TAG — Operator image tag only (ignored when QUAY_UNIFIED_IMAGE_TAG is set)
-#   QUAY_UNIFIED_IMAGE_TAG — Optional; same tag for operator + bundle + catalog (overrides QUAY_TAG and v$VERSION tags)
-#   QUAY_OLM_VERSION — OLM VERSION for Makefile / CSV (e.g. 3.4.0); bundle/catalog image tags stay v$VERSION unless QUAY_UNIFIED_IMAGE_TAG is set
+#   QUAY_UNIFIED_IMAGE_TAG — Optional; vX.Y.Z or X.Y.Z for operator + bundle + catalog; derives OLM VERSION (overrides QUAY_OLM_VERSION when set)
+#   QUAY_OLM_VERSION — OLM VERSION when QUAY_UNIFIED_IMAGE_TAG is unset (e.g. 3.4.0); bundle/catalog tags v$VERSION
 #
 # Secrets (required):
 #   QUAY_USERNAME — Quay.io username or robot account name
@@ -45,7 +45,7 @@ on:
         default: ""
         type: string
       unified_image_tag:
-        description: "QUAY_UNIFIED_IMAGE_TAG — one tag for operator, bundle, and catalog (e.g. ci-20250330). Empty = use QUAY_TAG + v$VERSION separately. Overrides img_tag when set."
+        description: "QUAY_UNIFIED_IMAGE_TAG — vX.Y.Z or X.Y.Z for operator, bundle, catalog; derives OLM version. Empty = QUAY_TAG + QUAY_OLM_VERSION. Overrides img_tag when set."
         required: false
         default: ""
         type: string
@@ -201,7 +201,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "### Built images" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Tags:** If \`QUAY_UNIFIED_IMAGE_TAG\` / \`unified_image_tag\` is set, **operator**, **bundle**, and **catalog** share that tag. Otherwise the **operator** uses \`QUAY_TAG\` / \`img_tag\`; **bundle** and **catalog** use \`v\$VERSION\` from \`QUAY_OLM_VERSION\` / \`version\` / Makefile." >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tags:** If \`QUAY_UNIFIED_IMAGE_TAG\` / \`unified_image_tag\` is set (\`vX.Y.Z\` or \`X.Y.Z\`), **operator**, **bundle**, and **catalog** share that tag and **OLM VERSION** is derived from it. Otherwise the **operator** uses \`QUAY_TAG\` / \`img_tag\`; **bundle** and **catalog** use \`v\$VERSION\` from \`QUAY_OLM_VERSION\` / \`version\` / Makefile." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Logs:** Values stored as [secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) are masked as \`***\` in logs. Use [repository variables](https://docs.github.com/en/actions/learn-github-actions/variables#defining-configuration-variables-for-multiple-workflows) for image paths and tags to see full names here (keep \`QUAY_USERNAME\` / \`QUAY_PASSWORD\` as secrets)." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
