@@ -9,13 +9,15 @@ The script always builds and pushes the **operator** image, the OLM **bundle** i
 | Output | Image reference |
 |--------|-----------------|
 | Operator | `$IMAGE_TAG_BASE:$IMG_TAG` |
-| Bundle | If `BUNDLE_REPO` is set: `$BUNDLE_REPO:v$VERSION`. Otherwise: `$IMAGE_TAG_BASE-bundle:v$VERSION` |
-| Catalog | If `CATALOG_REPO` is set: `$CATALOG_REPO:v$VERSION`. Otherwise: `$IMAGE_TAG_BASE-catalog:v$VERSION` |
+| Bundle | If `BUNDLE_REPO` is set: `$BUNDLE_REPO:<tag>`. Otherwise: `$IMAGE_TAG_BASE-bundle:<tag>` |
+| Catalog | If `CATALOG_REPO` is set: `$CATALOG_REPO:<tag>`. Otherwise: `$IMAGE_TAG_BASE-catalog:<tag>` |
 
-**Two different “versions”:**
+**Tag column:** `<tag>` is **`v$VERSION`** by default (same **`VERSION`** as the OLM bundle metadata). If **`UNIFIED_IMAGE_TAG`** is set (`QUAY_UNIFIED_IMAGE_TAG` / workflow **`unified_image_tag`**), **operator**, **bundle**, and **catalog** all use that **same** tag string instead.
 
-- **`IMG_TAG`** (from `QUAY_TAG` or `img_tag`) is only the **operator** container tag: `quay.io/org/opendatahub-operator:mytag`.
-- **`VERSION`** is the **OLM** bundle/catalog version used in image tags like `…-bundle:v3.3.0` and `…:v3.3.0`. It defaults to whatever the [upstream Makefile](https://github.com/opendatahub-io/opendatahub-operator/blob/main/Makefile) sets (often `3.3.0`) unless you set **`QUAY_OLM_VERSION`** (repository variable or secret) or the workflow **`version`** input. It does **not** follow `QUAY_TAG` automatically.
+**Versions:**
+
+- **`VERSION`** (from **`QUAY_OLM_VERSION`**, workflow **`version`**, or the [upstream Makefile](https://github.com/opendatahub-io/opendatahub-operator/blob/main/Makefile) default) drives **`make`** and the **CSV** / **`OPERATOR_STARTING_CSV`**. Bundle and catalog **image** tags are **`v$VERSION`** unless **`UNIFIED_IMAGE_TAG`** is set.
+- **`IMG_TAG`** (from **`QUAY_TAG`** or **`img_tag`**) is the **operator** tag when **`UNIFIED_IMAGE_TAG`** is unset (default **`latest`**). When **`UNIFIED_IMAGE_TAG`** is set, it replaces **`IMG_TAG`** and is also used for bundle and catalog image tags.
 
 ## GitHub Actions
 
@@ -33,10 +35,11 @@ Configure under **Settings → Secrets and variables → Actions → Variables**
 | Variable | Purpose |
 |----------|---------|
 | `QUAY_REPO` | Operator image path **without** tag (e.g. `quay.io/myorg/opendatahub-operator`) |
-| `QUAY_TAG` | Tag for the **operator** image only. If unset, the script defaults to `latest`. |
-| `QUAY_OLM_VERSION` | Optional. OLM bundle/catalog version without a leading `v` (e.g. `3.4.0`). If unset, the upstream Makefile default applies (often `3.3.0`). |
-| `QUAY_BUNDLE_REPO` | Optional. Separate **OLM bundle** image path **without** tag. If unset, bundle is `${QUAY_REPO}-bundle:v$VERSION`. |
-| `QUAY_CATALOG_REPO` | Optional. Separate **catalog** index path **without** tag. If unset, catalog is `${QUAY_REPO}-catalog:v$VERSION`. |
+| `QUAY_TAG` | Operator image tag when **`QUAY_UNIFIED_IMAGE_TAG`** is unset. Default **`latest`**. |
+| `QUAY_UNIFIED_IMAGE_TAG` | Optional. One tag for **operator**, **bundle**, and **catalog** images (e.g. `build-42`). When set, overrides **`QUAY_TAG`** for the operator and replaces **`v$VERSION`** tags on bundle/catalog. |
+| `QUAY_OLM_VERSION` | Optional. OLM **`VERSION`** without a leading **`v`** (e.g. `3.4.0`). Drives Makefile/CSV; bundle/catalog **image** tags stay **`v$VERSION`** unless **`QUAY_UNIFIED_IMAGE_TAG`** is set. |
+| `QUAY_BUNDLE_REPO` | Optional. Separate **OLM bundle** image path **without** tag. If unset, bundle is `${QUAY_REPO}-bundle:<tag>`. |
+| `QUAY_CATALOG_REPO` | Optional. Separate **catalog** index path **without** tag. If unset, catalog is `${QUAY_REPO}-catalog:<tag>`. |
 | `MAAS_MANIFEST_ORG` | Optional. Segment 1 of **`--maas=org:repo:ref:path`**. Default **`opendatahub-io`**. |
 | `MAAS_MANIFEST_REPO` | Optional. Segment 2. Default **`maas-billing`**. |
 | `MAAS_MANIFEST_REF` | Optional. Segment 3 (branch, tag, or `main@sha`). Default **`main`**. |
@@ -64,7 +67,8 @@ Leave any field empty to keep using the matching **variable** or **secret**.
 | Input | Meaning |
 |-------|---------|
 | `image_tag_base` | Overrides `QUAY_REPO` for that run |
-| `img_tag` | Overrides `QUAY_TAG` for that run |
+| `img_tag` | Overrides `QUAY_TAG` for that run (ignored when **`unified_image_tag`** is set) |
+| `unified_image_tag` | Overrides **`QUAY_UNIFIED_IMAGE_TAG`** — same tag on operator, bundle, and catalog |
 | `bundle_repo` | Overrides `QUAY_BUNDLE_REPO` for that run |
 | `catalog_repo` | Overrides `QUAY_CATALOG_REPO` for that run |
 | `version` | OLM `VERSION` (empty = variable or secret `QUAY_OLM_VERSION`, else Makefile default) |
@@ -136,13 +140,14 @@ export BUNDLE_REPO=quay.io/myorg/odh-operator-bundle  # optional; separate OLM b
 export CATALOG_REPO=quay.io/myorg/odh-catalog-index   # optional; separate catalog image
 export QUAY_USERNAME=youruser
 export QUAY_PASSWORD=yourtoken
-export IMG_TAG=latest                    # optional
+export IMG_TAG=latest                    # optional (ignored if UNIFIED_IMAGE_TAG is set)
+# export UNIFIED_IMAGE_TAG=my-build-123  # optional: same tag on operator + bundle + catalog
 export OPERATOR_GIT_REF=main             # optional upstream ref
 ./scripts/build-and-push-odh-operator.sh
 cat build-output.env
 ```
 
-The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), `VERSION`, `OPERATOR_STARTING_CSV`, `MANIFEST_VALIDATION_DIR` (unless get-manifests was skipped), and `MAAS_DEPLOY_COMMAND` / `MAAS_DEPLOY_SNIPPET`. Unless **`SKIP_GET_MANIFESTS=1`**, it also writes **`manifest-validation/`** (`get_all_manifests.sh` copy, **`maas-fetch-effective.txt`**). It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
+The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `UNIFIED_IMAGE_TAG`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), `VERSION`, `OPERATOR_STARTING_CSV`, `MANIFEST_VALIDATION_DIR` (unless get-manifests was skipped), and `MAAS_DEPLOY_COMMAND` / `MAAS_DEPLOY_SNIPPET`. Unless **`SKIP_GET_MANIFESTS=1`**, it also writes **`manifest-validation/`** (`get_all_manifests.sh` copy, **`maas-fetch-effective.txt`**). It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
 
 ### Container commands
 

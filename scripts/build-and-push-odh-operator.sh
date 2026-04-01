@@ -16,7 +16,11 @@
 #   CATALOG_REPO    Separate catalog image path without tag (e.g. quay.io/myorg/odh-catalog-index).
 #                   If unset, catalog is ${IMAGE_TAG_BASE}-catalog:v$VERSION (upstream default).
 #   IMG_TAG           Operator image tag (default: latest)
-#   VERSION           OLM bundle/catalog version string used in bundle tag v$VERSION (Makefile default if unset)
+#   UNIFIED_IMAGE_TAG If set, use this exact tag for operator, bundle, and catalog images (overrides IMG_TAG for
+#                     the operator and replaces bundle/catalog tags v$VERSION with this tag). OLM bundle *metadata*
+#                     VERSION still comes from VERSION / Makefile (see print-VERSION).
+#   VERSION           OLM bundle/catalog *version* for Makefile and CSV (Makefile default if unset). Image tags
+#                     default to v$VERSION for bundle/catalog unless UNIFIED_IMAGE_TAG is set.
 #   OPERATOR_GIT_REF  Branch, tag, or commit to build (default: main)
 #   OPERATOR_REPO_URL Clone URL (default: upstream GitHub)
 #   CLONE_DIR         Where to clone the operator repo (default: ./opendatahub-operator)
@@ -50,6 +54,10 @@
 set -euo pipefail
 
 IMG_TAG="${IMG_TAG:-latest}"
+UNIFIED_IMAGE_TAG="${UNIFIED_IMAGE_TAG:-}"
+if [[ -n "${UNIFIED_IMAGE_TAG}" ]]; then
+  IMG_TAG="${UNIFIED_IMAGE_TAG}"
+fi
 OPERATOR_GIT_REF="${OPERATOR_GIT_REF:-main}"
 OPERATOR_REPO_URL="${OPERATOR_REPO_URL:-https://github.com/opendatahub-io/opendatahub-operator.git}"
 CLONE_DIR="${CLONE_DIR:-./opendatahub-operator}"
@@ -215,15 +223,21 @@ echo "Building and pushing operator image..."
 make "${MAKE_ARGS[@]}" image
 
 VERSION_RESOLVED="$(make "${MAKE_ARGS[@]}" -s print-VERSION)"
-if [[ -n "${BUNDLE_REPO:-}" ]]; then
-  BUNDLE_IMG="${BUNDLE_REPO}:v${VERSION_RESOLVED}"
+if [[ -n "${UNIFIED_IMAGE_TAG}" ]]; then
+  olm_image_tag="${UNIFIED_IMAGE_TAG}"
+  echo "UNIFIED_IMAGE_TAG=${UNIFIED_IMAGE_TAG} — operator, bundle, and catalog images use the same tag (OLM VERSION / CSV still ${VERSION_RESOLVED})."
 else
-  BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:v${VERSION_RESOLVED}"
+  olm_image_tag="v${VERSION_RESOLVED}"
+fi
+if [[ -n "${BUNDLE_REPO:-}" ]]; then
+  BUNDLE_IMG="${BUNDLE_REPO}:${olm_image_tag}"
+else
+  BUNDLE_IMG="${IMAGE_TAG_BASE}-bundle:${olm_image_tag}"
 fi
 if [[ -n "${CATALOG_REPO:-}" ]]; then
-  CATALOG_IMG="${CATALOG_REPO}:v${VERSION_RESOLVED}"
+  CATALOG_IMG="${CATALOG_REPO}:${olm_image_tag}"
 else
-  CATALOG_IMG="${IMAGE_TAG_BASE}-catalog:v${VERSION_RESOLVED}"
+  CATALOG_IMG="${IMAGE_TAG_BASE}-catalog:${olm_image_tag}"
 fi
 
 echo "Building and pushing bundle image (${BUNDLE_IMG})..."
@@ -260,6 +274,7 @@ ${MAAS_DEPLOY_COMMAND}"
   echo "MAAS_OVERRIDE=${maas_override:-}"
   echo "MAAS_MANIFEST_RESOLVED_REF=${MAAS_RESOLVED_REF:-}"
   echo "IMG_TAG=${IMG_TAG}"
+  echo "UNIFIED_IMAGE_TAG=${UNIFIED_IMAGE_TAG:-}"
   echo "VERSION=${VERSION_RESOLVED}"
   echo "OPERATOR_STARTING_CSV=${OPERATOR_STARTING_CSV}"
   if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
