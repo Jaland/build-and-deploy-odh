@@ -58,6 +58,7 @@ Configure under **Settings → Secrets and variables → Actions → Variables**
 | `MAAS_MANIFEST_REF` | Optional. Segment 3 (branch, tag, or `main@sha`). Default **`main`**. |
 | `MAAS_MANIFEST_SOURCE_PATH` | Optional. Segment 4 (folder in repo). Default **`deployment`**. |
 | `MAAS_MANIFEST_PIN_LATEST`, `MAAS_MANIFEST_SKIP_FILE_PATCH`, `MAAS_MANIFEST_USE_UPSTREAM_PIN` | Optional; see workflow. Full default **`--maas=`** is **`opendatahub-io:maas-billing:main:deployment`**. |
+| `DASHBOARD_USE_MAIN` | Set to **`1`** or **`true`** for **push** builds: fetch **[`odh-dashboard`](https://github.com/opendatahub-io/odh-dashboard)** from **`main`** (`manifests/`). **OpenDataHub** only; ignored when **`ODH_PLATFORM_TYPE=rhoai`**. Same behavior as workflow dispatch **`dashboard_use_main`**. |
 
 ### Required repository secrets
 
@@ -94,6 +95,7 @@ Leave any field empty to keep using the matching **variable** or **secret**.
 | `maas_manifest_pin_latest` | Pin `main` to current commit (`main@sha`); needs ref **`main`** |
 | `maas_manifest_use_upstream_pin` | Use upstream [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) `["maas"]` pin instead of passing **`--maas=`** |
 | `maas_manifest_skip_file_patch` | Set **`MAAS_MANIFEST_SKIP_FILE_PATCH=1`** — do not rewrite `get_all_manifests.sh` on disk |
+| `dashboard_use_main` | Fetch **dashboard** from **`main`**: rewrites ODH **`["dashboard"]`** in [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) to **`opendatahub-io:odh-dashboard:main:manifests`** and passes **`--dashboard=`** (same pattern as MaaS). **OpenDataHub** only. |
 
 ### Optional MaaS (Models-as-a-Service) manifest source
 
@@ -103,7 +105,9 @@ By default the build script **rewrites the ODH `["maas"]` line in `get_all_manif
 - **Other repos (e.g. [models-as-a-service](https://github.com/opendatahub-io/models-as-a-service)):** set the four variables so **`--maas=`** becomes e.g. **`opendatahub-io:models-as-a-service:main:deployment`**.
 - **Reproducible snapshot of `main`:** **`MAAS_MANIFEST_PIN_LATEST=1`** with **`MAAS_MANIFEST_REF=main`** (resolves to `main@<sha>` via `git ls-remote`).
 
-After **`get_all_manifests.sh`**, the build writes **`manifest-validation/get_all_manifests.sh`** (copy of the upstream map file) and **`manifest-validation/maas-fetch-effective.txt`** (effective **`--maas=`**). The GitHub workflow uploads those as artifact **`get-all-manifests-validation`**. **`build-output.env`** includes **`MANIFEST_VALIDATION_DIR`**.
+After **`get_all_manifests.sh`**, the build writes **`manifest-validation/get_all_manifests.sh`** (copy of the upstream map file) and **`manifest-validation/maas-fetch-effective.txt`** (effective **`--maas=`** and, when enabled, **`--dashboard=`** / **`DASHBOARD_OVERRIDE`**). The GitHub workflow uploads those as artifact **`get-all-manifests-validation`**. **`build-output.env`** includes **`MANIFEST_VALIDATION_DIR`** and **`DASHBOARD_OVERRIDE`** when dashboard main is used.
+
+**Dashboard on `main`:** Upstream ODH pins **`["dashboard"]`** to a **`main@<sha>`** in [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh). Set **`DASHBOARD_USE_MAIN=1`** (or check **`dashboard_use_main`** in the workflow) to use **`opendatahub-io:odh-dashboard:main:manifests`** instead (tip of **`main`**, like the default MaaS **`--maas=`** flow). Not applicable to **`rhoai`** (RHOAI uses **`red-hat-data-services`** pins).
 
 After a successful fetch with **`--maas=`** (the default path), the script **checks** that `opt/manifests/maas` exists and contains at least one file, and writes **`MAAS_MANIFEST_RESOLVED_REF`** to `build-output.env`.
 
@@ -156,11 +160,12 @@ export QUAY_PASSWORD=yourtoken
 export IMG_TAG=latest                    # optional (ignored if UNIFIED_IMAGE_TAG is set)
 # export UNIFIED_IMAGE_TAG=my-build-123  # optional: same tag on operator + bundle + catalog
 export OPERATOR_GIT_REF=main             # optional upstream ref
+# export DASHBOARD_USE_MAIN=1           # optional: fetch odh-dashboard from main (OpenDataHub only)
 ./scripts/build-and-push-odh-operator.sh
 cat build-output.env
 ```
 
-The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `UNIFIED_IMAGE_TAG`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), `VERSION`, `OPERATOR_STARTING_CSV`, `MANIFEST_VALIDATION_DIR` (unless get-manifests was skipped), and `MAAS_DEPLOY_COMMAND` / `MAAS_DEPLOY_SNIPPET`. Unless **`SKIP_GET_MANIFESTS=1`**, it also writes **`manifest-validation/`** (`get_all_manifests.sh` copy, **`maas-fetch-effective.txt`**). It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
+The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `UNIFIED_IMAGE_TAG`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), optional `DASHBOARD_OVERRIDE` (when **`DASHBOARD_USE_MAIN`** is set), `VERSION`, `OPERATOR_STARTING_CSV`, `MANIFEST_VALIDATION_DIR` (unless get-manifests was skipped), and `MAAS_DEPLOY_COMMAND` / `MAAS_DEPLOY_SNIPPET`. Unless **`SKIP_GET_MANIFESTS=1`**, it also writes **`manifest-validation/`** (`get_all_manifests.sh` copy, **`maas-fetch-effective.txt`**). It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
 
 ### Container commands
 

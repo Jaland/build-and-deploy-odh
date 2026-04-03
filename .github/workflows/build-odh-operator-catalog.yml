@@ -20,6 +20,7 @@
 #   opendatahub-io : maas-billing : main : deployment
 #   MAAS_MANIFEST_ORG, MAAS_MANIFEST_REPO, MAAS_MANIFEST_REF, MAAS_MANIFEST_SOURCE_PATH,
 #   MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_SKIP_FILE_PATCH, MAAS_MANIFEST_USE_UPSTREAM_PIN
+#   DASHBOARD_USE_MAIN — if true/1, fetch odh-dashboard from main (OpenDataHub only); workflow input dashboard_use_main or var
 #
 # Optional bundle deploy (advanced):
 #   - Set workflow input deploy_bundle to true
@@ -109,6 +110,11 @@ on:
         required: false
         default: false
         type: boolean
+      dashboard_use_main:
+        description: "DASHBOARD_USE_MAIN — fetch odh-dashboard from main (like default MaaS behavior). OpenDataHub only; ignored for rhoai."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -178,6 +184,7 @@ jobs:
           MAAS_MANIFEST_PIN_LATEST: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_pin_latest == true && '1' || vars.MAAS_MANIFEST_PIN_LATEST || secrets.MAAS_MANIFEST_PIN_LATEST }}
           MAAS_MANIFEST_SKIP_FILE_PATCH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_skip_file_patch == true && '1' || vars.MAAS_MANIFEST_SKIP_FILE_PATCH || secrets.MAAS_MANIFEST_SKIP_FILE_PATCH }}
           MAAS_MANIFEST_USE_UPSTREAM_PIN: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_use_upstream_pin == true && '1' || vars.MAAS_MANIFEST_USE_UPSTREAM_PIN || secrets.MAAS_MANIFEST_USE_UPSTREAM_PIN }}
+          DASHBOARD_USE_MAIN: ${{ github.event_name == 'workflow_dispatch' && inputs.dashboard_use_main == true && '1' || vars.DASHBOARD_USE_MAIN || secrets.DASHBOARD_USE_MAIN }}
         run: ./scripts/build-and-push-odh-operator.sh
 
       - name: Export job outputs (where the build is)
@@ -226,7 +233,7 @@ jobs:
           path: build-output.env
           if-no-files-found: error
 
-      - name: Upload get_all_manifests validation (map + effective MaaS fetch)
+      - name: Upload get_all_manifests validation (map + effective MaaS / dashboard overrides)
         uses: actions/upload-artifact@v4
         with:
           name: get-all-manifests-validation
