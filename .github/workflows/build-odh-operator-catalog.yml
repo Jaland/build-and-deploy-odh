@@ -21,6 +21,8 @@
 #   MAAS_MANIFEST_ORG, MAAS_MANIFEST_REPO, MAAS_MANIFEST_REF, MAAS_MANIFEST_SOURCE_PATH,
 #   MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_SKIP_FILE_PATCH, MAAS_MANIFEST_USE_UPSTREAM_PIN
 #   DASHBOARD_USE_MAIN — if true/1, fetch odh-dashboard from main (OpenDataHub only); workflow input dashboard_use_main or var
+#   OPERATOR_REPO_URL, OPERATOR_GIT_REF — custom opendatahub-operator clone (workflow inputs operator_repo_url, operator_git_ref)
+#   MAAS_MANIFEST_REPO_URL — optional GitHub HTTPS URL; sets org/repo for MaaS (input maas_manifest_repo_url)
 #
 # Optional bundle deploy (advanced):
 #   - Set workflow input deploy_bundle to true
@@ -115,6 +117,21 @@ on:
         required: false
         default: false
         type: boolean
+      operator_repo_url:
+        description: "OPERATOR_REPO_URL — git clone URL for opendatahub-operator (empty = upstream or variable OPERATOR_REPO_URL)."
+        required: false
+        default: ""
+        type: string
+      operator_git_ref:
+        description: "OPERATOR_GIT_REF — branch/tag/commit for operator clone. Empty = use git_ref input, else variable OPERATOR_GIT_REF, else main."
+        required: false
+        default: ""
+        type: string
+      maas_manifest_repo_url:
+        description: "MAAS_MANIFEST_REPO_URL — GitHub HTTPS URL for MaaS manifests repo (e.g. https://github.com/org/models-as-a-service). Sets org/repo; use maas_manifest_ref for branch. Empty = variables."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -172,7 +189,8 @@ jobs:
           BUNDLE_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_repo != '' && inputs.bundle_repo || vars.QUAY_BUNDLE_REPO || secrets.QUAY_BUNDLE_REPO }}
           CATALOG_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.catalog_repo != '' && inputs.catalog_repo || vars.QUAY_CATALOG_REPO || secrets.QUAY_CATALOG_REPO }}
           VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' && inputs.version || vars.QUAY_OLM_VERSION || secrets.QUAY_OLM_VERSION }}
-          OPERATOR_GIT_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.git_ref || 'main' }}
+          OPERATOR_REPO_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.operator_repo_url != '' && inputs.operator_repo_url || vars.OPERATOR_REPO_URL || secrets.OPERATOR_REPO_URL || '' }}
+          OPERATOR_GIT_REF: ${{ github.event_name == 'workflow_dispatch' && (inputs.operator_git_ref != '' && inputs.operator_git_ref || inputs.git_ref) || vars.OPERATOR_GIT_REF || secrets.OPERATOR_GIT_REF || 'main' }}
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
           QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
           DEPLOY_BUNDLE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_bundle == true && '1' || '0' }}
@@ -185,6 +203,7 @@ jobs:
           MAAS_MANIFEST_SKIP_FILE_PATCH: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_skip_file_patch == true && '1' || vars.MAAS_MANIFEST_SKIP_FILE_PATCH || secrets.MAAS_MANIFEST_SKIP_FILE_PATCH }}
           MAAS_MANIFEST_USE_UPSTREAM_PIN: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_use_upstream_pin == true && '1' || vars.MAAS_MANIFEST_USE_UPSTREAM_PIN || secrets.MAAS_MANIFEST_USE_UPSTREAM_PIN }}
           DASHBOARD_USE_MAIN: ${{ github.event_name == 'workflow_dispatch' && inputs.dashboard_use_main == true && '1' || vars.DASHBOARD_USE_MAIN || secrets.DASHBOARD_USE_MAIN }}
+          MAAS_MANIFEST_REPO_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo_url != '' && inputs.maas_manifest_repo_url || vars.MAAS_MANIFEST_REPO_URL || secrets.MAAS_MANIFEST_REPO_URL || '' }}
         run: ./scripts/build-and-push-odh-operator.sh
 
       - name: Export job outputs (where the build is)

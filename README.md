@@ -59,6 +59,9 @@ Configure under **Settings → Secrets and variables → Actions → Variables**
 | `MAAS_MANIFEST_SOURCE_PATH` | Optional. Segment 4 (folder in repo). Default **`deployment`**. |
 | `MAAS_MANIFEST_PIN_LATEST`, `MAAS_MANIFEST_SKIP_FILE_PATCH`, `MAAS_MANIFEST_USE_UPSTREAM_PIN` | Optional; see workflow. Full default **`--maas=`** is **`opendatahub-io:maas-billing:main:deployment`**. |
 | `DASHBOARD_USE_MAIN` | Set to **`1`** or **`true`** for **push** builds: fetch **[`odh-dashboard`](https://github.com/opendatahub-io/odh-dashboard)** from **`main`** (`manifests/`). **OpenDataHub** only; ignored when **`ODH_PLATFORM_TYPE=rhoai`**. Same behavior as workflow dispatch **`dashboard_use_main`**. |
+| `OPERATOR_REPO_URL` | Optional. Git clone URL for **opendatahub-operator** (forks). Same as workflow **`operator_repo_url`**. |
+| `OPERATOR_GIT_REF` | Optional. Branch, tag, or commit for the operator repo. Push builds use this when **`git_ref`** is not applicable. Same as workflow **`operator_git_ref`** when set. |
+| `MAAS_MANIFEST_REPO_URL` | Optional. **`https://github.com/org/repo`** for the **MaaS** manifests repository; sets org/repo (overrides **`MAAS_MANIFEST_ORG`** / **`MAAS_MANIFEST_REPO`**). Ref/path still from **`MAAS_MANIFEST_REF`** / **`MAAS_MANIFEST_SOURCE_PATH`**. |
 
 ### Required repository secrets
 
@@ -96,6 +99,9 @@ Leave any field empty to keep using the matching **variable** or **secret**.
 | `maas_manifest_use_upstream_pin` | Use upstream [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) `["maas"]` pin instead of passing **`--maas=`** |
 | `maas_manifest_skip_file_patch` | Set **`MAAS_MANIFEST_SKIP_FILE_PATCH=1`** — do not rewrite `get_all_manifests.sh` on disk |
 | `dashboard_use_main` | Fetch **dashboard** from **`main`**: rewrites ODH **`["dashboard"]`** in [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) to **`opendatahub-io:odh-dashboard:main:manifests`** and passes **`--dashboard=`** (same pattern as MaaS). **OpenDataHub** only. |
+| `operator_repo_url` | **`OPERATOR_REPO_URL`** — clone URL for **opendatahub-operator** (empty = default upstream). |
+| `operator_git_ref` | **`OPERATOR_GIT_REF`** — branch/tag/commit; if empty, **`git_ref`** applies. |
+| `maas_manifest_repo_url` | **`MAAS_MANIFEST_REPO_URL`** — GitHub HTTPS URL for the MaaS repo; **ref** still from **`maas_manifest_ref`**. |
 
 ### Optional MaaS (Models-as-a-Service) manifest source
 
@@ -182,6 +188,24 @@ IMAGE_BUILDER=docker ./scripts/build-and-push-odh-operator.sh
 ```
 
 `IMAGE_BUILDER` is passed through to the upstream `Makefile` as the image tool.
+
+## Custom operator and MaaS sources (forks / custom builds)
+
+Use these when you build from a **fork** or a **non-default branch** without editing the script.
+
+### Open Data Hub operator clone
+
+| Variable / input | Purpose |
+|------------------|---------|
+| **`OPERATOR_REPO_URL`** / **`operator_repo_url`** | Git clone URL for [opendatahub-operator](https://github.com/opendatahub-io/opendatahub-operator) (e.g. `https://github.com/myorg/opendatahub-operator.git`). Empty = default upstream URL. |
+| **`OPERATOR_GIT_REF`** / **`operator_git_ref`** | Branch, tag, or commit to check out. On **workflow dispatch**, if **`operator_git_ref`** is empty, **`git_ref`** is used. On **push**, use repository variable **`OPERATOR_GIT_REF`** (default **`main`** if unset). |
+
+### Models-as-a-Service manifests repo
+
+Upstream [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) clones from **github.com** only. You can point the MaaS component at any **GitHub** repo using either:
+
+- **`MAAS_MANIFEST_ORG`** + **`MAAS_MANIFEST_REPO`** + **`MAAS_MANIFEST_REF`** + **`MAAS_MANIFEST_SOURCE_PATH`** (same as before), or
+- **`MAAS_MANIFEST_REPO_URL`** / **`maas_manifest_repo_url`**: an HTTPS URL such as `https://github.com/opendatahub-io/models-as-a-service` or `https://github.com/myorg/maas-billing.git`. The script parses **org** and **repo** from the URL and **overrides** **`MAAS_MANIFEST_ORG`** / **`MAAS_MANIFEST_REPO`**. Branch (or tag / `main@sha`) still comes from **`MAAS_MANIFEST_REF`** and path from **`MAAS_MANIFEST_SOURCE_PATH`** (default **`deployment`** for the usual layout).
 
 ## Upstream documentation
 
