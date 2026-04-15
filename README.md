@@ -43,7 +43,7 @@ Workflow: [`.github/workflows/build-odh-operator-catalog.yml`](.github/workflows
 
 ### Repository variables (recommended for image paths and tags)
 
-Configure under **Settings → Secrets and variables → Actions → Variables**. These values are **not** redacted in workflow logs. The workflow reads **`vars.NAME` first**, then falls back to **`secrets.NAME`** if you still store the same name as a secret.
+Configure under **Settings → Secrets and variables → Actions → Variables**. These values are **not** redacted in workflow logs. The workflow passes them into the build step as environment variables (`vars.NAME`, with **`secrets.NAME`** as fallback). They apply to **every** workflow run (**push to `main`** and **workflow dispatch**). For **manual runs**, leave an input empty to use the variable; non-empty inputs override for that run only.
 
 | Variable | Purpose |
 |----------|---------|
@@ -60,7 +60,7 @@ Configure under **Settings → Secrets and variables → Actions → Variables**
 | `MAAS_MANIFEST_PIN_LATEST`, `MAAS_MANIFEST_SKIP_FILE_PATCH`, `MAAS_MANIFEST_USE_UPSTREAM_PIN` | Optional; see workflow. Full default **`--maas=`** is **`opendatahub-io:maas-billing:main:deployment`**. |
 | `DASHBOARD_USE_MAIN` | Set to **`1`** or **`true`** for **push** builds: fetch **[`odh-dashboard`](https://github.com/opendatahub-io/odh-dashboard)** from **`main`** (`manifests/`). **OpenDataHub** only; ignored when **`ODH_PLATFORM_TYPE=rhoai`**. Same behavior as workflow dispatch **`dashboard_use_main`**. |
 | `OPERATOR_REPO_URL` | Optional. Git clone URL for **opendatahub-operator** (forks). Same as workflow **`operator_repo_url`**. |
-| `OPERATOR_GIT_REF` | Optional. Branch, tag, or commit for the operator repo. Push builds use this when **`git_ref`** is not applicable. Same as workflow **`operator_git_ref`** when set. |
+| `OPERATOR_GIT_REF` | Optional. Branch, tag, or commit for the operator repo. Used on **push** (and as fallback when dispatch inputs are empty). **Manual dispatch** priority: **`operator_git_ref`** input → this variable → **`git_ref`** input → **`main`**. |
 | `MAAS_MANIFEST_REPO_URL` | Optional. **`https://github.com/org/repo`** for the **MaaS** manifests repository; sets org/repo (overrides **`MAAS_MANIFEST_ORG`** / **`MAAS_MANIFEST_REPO`**). Ref/path still from **`MAAS_MANIFEST_REF`** / **`MAAS_MANIFEST_SOURCE_PATH`**. |
 
 ### Required repository secrets
@@ -100,7 +100,7 @@ Leave any field empty to keep using the matching **variable** or **secret**.
 | `maas_manifest_skip_file_patch` | Set **`MAAS_MANIFEST_SKIP_FILE_PATCH=1`** — do not rewrite `get_all_manifests.sh` on disk |
 | `dashboard_use_main` | Fetch **dashboard** from **`main`**: rewrites ODH **`["dashboard"]`** in [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh) to **`opendatahub-io:odh-dashboard:main:manifests`** and passes **`--dashboard=`** (same pattern as MaaS). **OpenDataHub** only. |
 | `operator_repo_url` | **`OPERATOR_REPO_URL`** — clone URL for **opendatahub-operator** (empty = default upstream). |
-| `operator_git_ref` | **`OPERATOR_GIT_REF`** — branch/tag/commit; if empty, **`git_ref`** applies. |
+| `operator_git_ref` | **`OPERATOR_GIT_REF`** — branch/tag/commit. If empty, **`OPERATOR_GIT_REF`** repository variable applies; if that is also empty, **`git_ref`** applies. |
 | `maas_manifest_repo_url` | **`MAAS_MANIFEST_REPO_URL`** — GitHub HTTPS URL for the MaaS repo; **ref** still from **`maas_manifest_ref`**. |
 
 ### Optional MaaS (Models-as-a-Service) manifest source

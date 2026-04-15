@@ -3,6 +3,9 @@
 #
 # Configure repository variables (Settings → Secrets and variables → Actions → Variables) — recommended for
 # image paths/tags so logs are not redacted. Optional secrets with the same names still work as fallback.
+# Variables are read on every run (push to main and workflow_dispatch). Manual run inputs override when non-empty;
+# otherwise these vars apply (see each input description).
+#
 #   QUAY_REPO — Operator image path without tag (e.g. quay.io/myorg/opendatahub-operator)
 #   QUAY_BUNDLE_REPO — Optional OLM bundle image path without tag (e.g. quay.io/myorg/odh-operator-bundle).
 #     If unset, bundle is ${QUAY_REPO}-bundle:v$VERSION
@@ -10,6 +13,12 @@
 #   QUAY_TAG — Operator image tag only (ignored when QUAY_UNIFIED_IMAGE_TAG is set)
 #   QUAY_UNIFIED_IMAGE_TAG — Optional; vX.Y.Z or X.Y.Z for operator + bundle + catalog; derives OLM VERSION (overrides QUAY_OLM_VERSION when set)
 #   QUAY_OLM_VERSION — OLM VERSION when QUAY_UNIFIED_IMAGE_TAG is unset (e.g. 3.4.0); bundle/catalog tags v$VERSION
+#   OPERATOR_REPO_URL — Git clone URL for opendatahub-operator (forks); empty = upstream default
+#   OPERATOR_GIT_REF — Branch/tag/commit for operator clone; used on push and when dispatch inputs leave ref empty
+#   MAAS_MANIFEST_REPO_URL — https://github.com/org/repo for MaaS manifests (sets org/repo); ref/path still MAAS_MANIFEST_*
+#   MAAS_MANIFEST_ORG, MAAS_MANIFEST_REPO, MAAS_MANIFEST_REF, MAAS_MANIFEST_SOURCE_PATH — MaaS --maas= segments
+#   MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_SKIP_FILE_PATCH, MAAS_MANIFEST_USE_UPSTREAM_PIN
+#   DASHBOARD_USE_MAIN — true/1 to fetch odh-dashboard from main (OpenDataHub only)
 #
 # Secrets (required):
 #   QUAY_USERNAME — Quay.io username or robot account name
@@ -20,9 +29,6 @@
 #   opendatahub-io : maas-billing : main : deployment
 #   MAAS_MANIFEST_ORG, MAAS_MANIFEST_REPO, MAAS_MANIFEST_REF, MAAS_MANIFEST_SOURCE_PATH,
 #   MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_SKIP_FILE_PATCH, MAAS_MANIFEST_USE_UPSTREAM_PIN
-#   DASHBOARD_USE_MAIN — if true/1, fetch odh-dashboard from main (OpenDataHub only); workflow input dashboard_use_main or var
-#   OPERATOR_REPO_URL, OPERATOR_GIT_REF — custom opendatahub-operator clone (workflow inputs operator_repo_url, operator_git_ref)
-#   MAAS_MANIFEST_REPO_URL — optional GitHub HTTPS URL; sets org/repo for MaaS (input maas_manifest_repo_url)
 #
 # Optional bundle deploy (advanced):
 #   - Set workflow input deploy_bundle to true
@@ -190,7 +196,8 @@ jobs:
           CATALOG_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.catalog_repo != '' && inputs.catalog_repo || vars.QUAY_CATALOG_REPO || secrets.QUAY_CATALOG_REPO }}
           VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' && inputs.version || vars.QUAY_OLM_VERSION || secrets.QUAY_OLM_VERSION }}
           OPERATOR_REPO_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.operator_repo_url != '' && inputs.operator_repo_url || vars.OPERATOR_REPO_URL || secrets.OPERATOR_REPO_URL || '' }}
-          OPERATOR_GIT_REF: ${{ github.event_name == 'workflow_dispatch' && (inputs.operator_git_ref != '' && inputs.operator_git_ref || inputs.git_ref) || vars.OPERATOR_GIT_REF || secrets.OPERATOR_GIT_REF || 'main' }}
+          # Dispatch: input operator_git_ref > repository var OPERATOR_GIT_REF > input git_ref. Push: vars/secrets OPERATOR_GIT_REF or main.
+          OPERATOR_GIT_REF: ${{ github.event_name == 'workflow_dispatch' && (inputs.operator_git_ref != '' && inputs.operator_git_ref || vars.OPERATOR_GIT_REF != '' && vars.OPERATOR_GIT_REF || inputs.git_ref) || vars.OPERATOR_GIT_REF || secrets.OPERATOR_GIT_REF || 'main' }}
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
           QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
           DEPLOY_BUNDLE: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_bundle == true && '1' || '0' }}
