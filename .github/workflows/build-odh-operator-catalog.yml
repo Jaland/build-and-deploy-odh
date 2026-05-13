@@ -18,6 +18,7 @@
 #   MAAS_MANIFEST_REPO_URL — https://github.com/org/repo for MaaS manifests (sets org/repo); ref/path still MAAS_MANIFEST_*
 #   MAAS_MANIFEST_ORG, MAAS_MANIFEST_REPO, MAAS_MANIFEST_REF, MAAS_MANIFEST_SOURCE_PATH — MaaS --maas= segments
 #   MAAS_MANIFEST_PIN_LATEST, MAAS_MANIFEST_SKIP_FILE_PATCH, MAAS_MANIFEST_USE_UPSTREAM_PIN
+#   MAAS_CONTROLLER_IMAGE, MAAS_API_IMAGE — optional operand images baked into fetched MaaS kustomizations (see build script)
 #   DASHBOARD_USE_MAIN — true/1 to fetch odh-dashboard from main (OpenDataHub only)
 #
 # Secrets (required):
@@ -138,6 +139,16 @@ on:
         required: false
         default: ""
         type: string
+      maas_controller_image:
+        description: "MAAS_CONTROLLER_IMAGE — full ref for maas-controller operand (e.g. quay.io/org/maas-controller:v1). Empty = variable/secret."
+        required: false
+        default: ""
+        type: string
+      maas_api_image:
+        description: "MAAS_API_IMAGE — full ref for maas-api operand (supports image@sha256:...). Empty = variable/secret."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -211,6 +222,8 @@ jobs:
           MAAS_MANIFEST_USE_UPSTREAM_PIN: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_use_upstream_pin == true && '1' || vars.MAAS_MANIFEST_USE_UPSTREAM_PIN || secrets.MAAS_MANIFEST_USE_UPSTREAM_PIN }}
           DASHBOARD_USE_MAIN: ${{ github.event_name == 'workflow_dispatch' && inputs.dashboard_use_main == true && '1' || vars.DASHBOARD_USE_MAIN || secrets.DASHBOARD_USE_MAIN }}
           MAAS_MANIFEST_REPO_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_manifest_repo_url != '' && inputs.maas_manifest_repo_url || vars.MAAS_MANIFEST_REPO_URL || secrets.MAAS_MANIFEST_REPO_URL || '' }}
+          MAAS_CONTROLLER_IMAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_controller_image != '' && inputs.maas_controller_image || vars.MAAS_CONTROLLER_IMAGE || secrets.MAAS_CONTROLLER_IMAGE || '' }}
+          MAAS_API_IMAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.maas_api_image != '' && inputs.maas_api_image || vars.MAAS_API_IMAGE || secrets.MAAS_API_IMAGE || '' }}
         run: ./scripts/build-and-push-odh-operator.sh
 
       - name: Export job outputs (where the build is)

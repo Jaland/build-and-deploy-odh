@@ -62,6 +62,8 @@ Configure under **Settings → Secrets and variables → Actions → Variables**
 | `OPERATOR_REPO_URL` | Optional. Git clone URL for **opendatahub-operator** (forks). Same as workflow **`operator_repo_url`**. |
 | `OPERATOR_GIT_REF` | Optional. Branch, tag, or commit for the operator repo. Used on **push** (and as fallback when dispatch inputs are empty). **Manual dispatch** priority: **`operator_git_ref`** input → this variable → **`git_ref`** input → **`main`**. |
 | `MAAS_MANIFEST_REPO_URL` | Optional. **`https://github.com/org/repo`** for the **MaaS** manifests repository; sets org/repo (overrides **`MAAS_MANIFEST_ORG`** / **`MAAS_MANIFEST_REPO`**). Ref/path still from **`MAAS_MANIFEST_REF`** / **`MAAS_MANIFEST_SOURCE_PATH`**. |
+| `MAAS_CONTROLLER_IMAGE` | Optional. Full container image for **maas-controller** baked into fetched MaaS kustomize manifests (e.g. **`quay.io/myorg/maas-controller:v1.2.3`** or **`...@sha256:...`**). See **MaaS operand images** below. |
+| `MAAS_API_IMAGE` | Optional. Full image for **maas-api** (same rules as **`MAAS_CONTROLLER_IMAGE`**). |
 
 ### Required repository secrets
 
@@ -102,16 +104,20 @@ Leave any field empty to keep using the matching **variable** or **secret**.
 | `operator_repo_url` | **`OPERATOR_REPO_URL`** — clone URL for **opendatahub-operator** (empty = default upstream). |
 | `operator_git_ref` | **`OPERATOR_GIT_REF`** — branch/tag/commit. If empty, **`OPERATOR_GIT_REF`** repository variable applies; if that is also empty, **`git_ref`** applies. |
 | `maas_manifest_repo_url` | **`MAAS_MANIFEST_REPO_URL`** — GitHub HTTPS URL for the MaaS repo; **ref** still from **`maas_manifest_ref`**. |
+| `maas_controller_image` | **`MAAS_CONTROLLER_IMAGE`** — **maas-controller** operand image (empty = variable/secret). |
+| `maas_api_image` | **`MAAS_API_IMAGE`** — **maas-api** operand image (empty = variable/secret). |
 
 ### Optional MaaS (Models-as-a-Service) manifest source
 
 By default the build script **rewrites the ODH `["maas"]` line in `get_all_manifests.sh` on disk** (only values starting with **`opendatahub-io:`**; the RHOAI block is left unchanged), then passes the same value as **`--maas=`** to [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh). The default is **`opendatahub-io:maas-billing:main:deployment`**, so the file and the fetch match the **current tip of `main`** from [**maas-billing**](https://github.com/opendatahub-io/maas-billing) under `deployment/`. Use **`MAAS_MANIFEST_SKIP_FILE_PATCH=1`** only if you want **`--maas=`** without editing the file.
 
+**MaaS operand images (`maas-controller`, `maas-api`):** the cloned [**models-as-a-service**](https://github.com/opendatahub-io/models-as-a-service) deployment uses kustomize **`images:`** entries (for example **`base/maas-controller/manager/kustomization.yaml`** and **`base/maas-api/core/kustomization.yaml`** under **`opt/manifests/maas/`** after fetch). By default those point at upstream Quay tags. Set **`MAAS_CONTROLLER_IMAGE`** and/or **`MAAS_API_IMAGE`** to full references (for example **`quay.io/myorg/maas-controller:my-tag`**) so this build rewrites **`newName`** / **`newTag`** (or **`digest`** when you pass **`...@sha256:...`**) before the operator image is built. The last **`:`** is treated as the tag delimiter only when it appears **after** the last **`/`** (so **`registry:5000/repo/name:tag`** works). A reference with no tag segment gets **`latest`**. **`build-output.env`** and **`manifest-validation/maas-fetch-effective.txt`** record **`MAAS_CONTROLLER_IMAGE_EFFECTIVE`** / **`MAAS_API_IMAGE_EFFECTIVE`** when set.
+
 - **To use upstream’s pinned `["maas"]` in the file instead** (e.g. `main@<sha>`): set **`MAAS_MANIFEST_USE_UPSTREAM_PIN=1`**. Then **`--maas=`** is not passed.
 - **Other repos (e.g. [models-as-a-service](https://github.com/opendatahub-io/models-as-a-service)):** set the four variables so **`--maas=`** becomes e.g. **`opendatahub-io:models-as-a-service:main:deployment`**.
 - **Reproducible snapshot of `main`:** **`MAAS_MANIFEST_PIN_LATEST=1`** with **`MAAS_MANIFEST_REF=main`** (resolves to `main@<sha>` via `git ls-remote`).
 
-After **`get_all_manifests.sh`**, the build writes **`manifest-validation/get_all_manifests.sh`** (copy of the upstream map file) and **`manifest-validation/maas-fetch-effective.txt`** (effective **`--maas=`** and, when enabled, **`--dashboard=`** / **`DASHBOARD_OVERRIDE`**). The GitHub workflow uploads those as artifact **`get-all-manifests-validation`**. **`build-output.env`** includes **`MANIFEST_VALIDATION_DIR`** and **`DASHBOARD_OVERRIDE`** when dashboard main is used.
+After **`get_all_manifests.sh`**, the build writes **`manifest-validation/get_all_manifests.sh`** (copy of the upstream map file) and **`manifest-validation/maas-fetch-effective.txt`** (effective **`--maas=`**, optional operand image lines, and when enabled **`--dashboard=`** / **`DASHBOARD_OVERRIDE`**). The GitHub workflow uploads those as artifact **`get-all-manifests-validation`**. **`build-output.env`** includes **`MANIFEST_VALIDATION_DIR`** and **`DASHBOARD_OVERRIDE`** when dashboard main is used.
 
 **Dashboard on `main`:** Upstream ODH pins **`["dashboard"]`** to a **`main@<sha>`** in [`get_all_manifests.sh`](https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh). Set **`DASHBOARD_USE_MAIN=1`** (or check **`dashboard_use_main`** in the workflow) to use **`opendatahub-io:odh-dashboard:main:manifests`** instead (tip of **`main`**, like the default MaaS **`--maas=`** flow). Not applicable to **`rhoai`** (RHOAI uses **`red-hat-data-services`** pins).
 
@@ -167,11 +173,13 @@ export IMG_TAG=latest                    # optional (ignored if UNIFIED_IMAGE_TA
 # export UNIFIED_IMAGE_TAG=my-build-123  # optional: same tag on operator + bundle + catalog
 export OPERATOR_GIT_REF=main             # optional upstream ref
 # export DASHBOARD_USE_MAIN=1           # optional: fetch odh-dashboard from main (OpenDataHub only)
+# export MAAS_CONTROLLER_IMAGE=quay.io/myorg/maas-controller:custom
+# export MAAS_API_IMAGE=quay.io/myorg/maas-api:custom
 ./scripts/build-and-push-odh-operator.sh
 cat build-output.env
 ```
 
-The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `UNIFIED_IMAGE_TAG`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), optional `DASHBOARD_OVERRIDE` (when **`DASHBOARD_USE_MAIN`** is set), `VERSION`, `OPERATOR_STARTING_CSV`, `MANIFEST_VALIDATION_DIR` (unless get-manifests was skipped), and `MAAS_DEPLOY_COMMAND` / `MAAS_DEPLOY_SNIPPET`. Unless **`SKIP_GET_MANIFESTS=1`**, it also writes **`manifest-validation/`** (`get_all_manifests.sh` copy, **`maas-fetch-effective.txt`**). It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
+The script writes `build-output.env` at the repository root with `OPERATOR_IMAGE`, `BUNDLE_IMAGE`, `CATALOG_IMAGE`, `IMAGE_TAG_BASE`, optional `UNIFIED_IMAGE_TAG`, optional `CATALOG_REPO`, optional `MAAS_OVERRIDE` (when a MaaS override was applied), optional `DASHBOARD_OVERRIDE` (when **`DASHBOARD_USE_MAIN`** is set), optional **`MAAS_CONTROLLER_IMAGE_EFFECTIVE`** / **`MAAS_API_IMAGE_EFFECTIVE`** (when those operand overrides were applied), `VERSION`, `OPERATOR_STARTING_CSV`, `MANIFEST_VALIDATION_DIR` (unless get-manifests was skipped), and `MAAS_DEPLOY_COMMAND` / `MAAS_DEPLOY_SNIPPET`. Unless **`SKIP_GET_MANIFESTS=1`**, it also writes **`manifest-validation/`** (`get_all_manifests.sh` copy, **`maas-fetch-effective.txt`**). It logs in to each distinct registry hostname found in `IMAGE_TAG_BASE` and `CATALOG_REPO` (same username/password).
 
 ### Container commands
 

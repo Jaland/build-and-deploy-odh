@@ -59,6 +59,13 @@
 #                            Rewrites ODH ["dashboard"] in get_all_manifests.sh and passes --dashboard=... (OpenDataHub only).
 #   ODH_PLATFORM_TYPE   OpenDataHub (default) or rhoai — selects which base manifest map is used before override
 #
+# Optional MaaS workload images (after get_all_manifests.sh; rewrites kustomize images: in fetched manifests):
+#   MAAS_CONTROLLER_IMAGE  Full container reference for the maas-controller operand, e.g. quay.io/myorg/maas-controller:v1.2.3
+#                        or quay.io/myorg/maas-controller@sha256:... (digest replaces newTag in kustomization).
+#                        Parsed as repository:tag when the last ':' is after the last '/' (supports registry:5000/repo:tag).
+#                        If there is no tag segment, newTag defaults to latest. Requires opt/manifests/maas/base/... layout.
+#   MAAS_API_IMAGE         Same for the maas-api operand (patches base/maas-api/core/kustomization.yaml).
+#
 set -euo pipefail
 
 IMG_TAG="${IMG_TAG:-latest}"
@@ -120,6 +127,8 @@ cd "$CLONE_DIR"
 maas_override=""
 MAAS_RESOLVED_REF=""
 dashboard_override=""
+MAAS_CONTROLLER_IMAGE_EFFECTIVE=""
+MAAS_API_IMAGE_EFFECTIVE=""
 
 # Log in once per registry host (operator/bundle and optional catalog may use different repos or hosts).
 login_registry_hosts() {
@@ -240,6 +249,79 @@ validate_dashboard_manifests() {
   echo "Validated dashboard manifests: ${d} (${n} file(s))"
 }
 
+# Patch models-as-a-service kustomize image newName/newTag (or digest) under opt/manifests/maas/ (see MAAS_*_IMAGE env).
+apply_maas_component_image_overrides() {
+  local maas_root="opt/manifests/maas"
+  [[ -d "${maas_root}" ]] || return 0
+  local ctrl="${MAAS_CONTROLLER_IMAGE:-}"
+  local api="${MAAS_API_IMAGE:-}"
+  [[ -z "${ctrl}" && -z "${api}" ]] && return 0
+  MAAS_CONTROLLER_IMAGE_EFFECTIVE="${ctrl}"
+  MAAS_API_IMAGE_EFFECTIVE="${api}"
+  _MAAS_ROOT="${maas_root}" _MAAS_CTRL_IMG="${ctrl}" _MAAS_API_IMG="${api}" python3 - <<'PY'
+import os, pathlib, re, sys
+
+def parse_ref(s: str):
+    s = (s or "").strip()
+    if not s:
+        return None
+    if "@" in s:
+        base, _, qual = s.rpartition("@")
+        if qual.startswith(("sha256:", "sha512:")):
+            return (base, None, qual)
+    slash = s.rfind("/")
+    colon = s.rfind(":")
+    if colon > slash:
+        return (s[:colon], s[colon + 1 :], None)
+    return (s, "latest", None)
+
+def patch_images_block(text: str, logical: str, parsed) -> str:
+    if not parsed:
+        return text
+    new_name, new_tag, digest = parsed
+    pat = re.compile(
+        rf"^([ \t]*- name: {re.escape(logical)}\n)((?:[ \t]+(?:newName|newTag|digest):[^\n]+\n)+)",
+        re.MULTILINE,
+    )
+    m = pat.search(text)
+    if not m:
+        return None
+    head = m.group(1)
+    inner = m.group(2)
+    ind_m = re.search(r"^([ \t]+)newName:", inner, re.MULTILINE)
+    ind = ind_m.group(1) if ind_m else "  "
+    if digest:
+        block = f"{head}{ind}newName: {new_name}\n{ind}digest: {digest}\n"
+    else:
+        block = f"{head}{ind}newName: {new_name}\n{ind}newTag: {new_tag}\n"
+    return text[: m.start()] + block + text[m.end() :]
+
+root = pathlib.Path(os.environ["_MAAS_ROOT"])
+jobs = [
+    (root / "base/maas-controller/manager/kustomization.yaml", "maas-controller", os.environ.get("_MAAS_CTRL_IMG", "")),
+    (root / "base/maas-api/core/kustomization.yaml", "maas-api", os.environ.get("_MAAS_API_IMG", "")),
+]
+for path, logical, ref in jobs:
+    ref = (ref or "").strip()
+    if not ref:
+        continue
+    parsed = parse_ref(ref)
+    if not path.is_file():
+        print(f"ERROR: MAAS_*_IMAGE set but missing file: {path}", file=sys.stderr)
+        sys.exit(1)
+    raw = path.read_text()
+    updated = patch_images_block(raw, logical, parsed)
+    if updated is None:
+        print(
+            f"ERROR: could not find images: entry '- name: {logical}' in {path} (MaaS layout changed?)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    path.write_text(updated)
+    print(f"Patched MaaS operand image {logical} in {path} ← {ref!r}")
+PY
+}
+
 if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
   echo "Fetching component manifests (get_all_manifests.sh)..."
   apply_maas_manifest_repo_url
@@ -269,6 +351,7 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
   [[ -n "${maas_override}" ]] && ga_args+=(--maas="${maas_override}")
   [[ -n "${dashboard_override}" ]] && ga_args+=(--dashboard="${dashboard_override}")
   ODH_PLATFORM_TYPE="${ODH_PLATFORM_TYPE}" VERSION="${VERSION_FOR_MANIFESTS}" ./get_all_manifests.sh "${ga_args[@]}"
+  apply_maas_component_image_overrides
   validate_maas_manifests
   validate_dashboard_manifests
   # Copy upstream manifest map + effective --maas for validation (CI uploads manifest-validation/ as an artifact).
@@ -301,6 +384,8 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
       echo "DASHBOARD_OVERRIDE="
       echo "GET_ALL_MANIFESTS_ARG_DASHBOARD="
     fi
+    echo "MAAS_CONTROLLER_IMAGE_EFFECTIVE=${MAAS_CONTROLLER_IMAGE_EFFECTIVE:-}"
+    echo "MAAS_API_IMAGE_EFFECTIVE=${MAAS_API_IMAGE_EFFECTIVE:-}"
   } > "${MANIFEST_ARTIFACT_DIR}/maas-fetch-effective.txt"
   echo "Manifest validation artifacts: ${MANIFEST_ARTIFACT_DIR}/ (get_all_manifests.sh, maas-fetch-effective.txt)"
 else
@@ -365,6 +450,8 @@ ${MAAS_DEPLOY_COMMAND}"
   echo "OPERATOR_GIT_REF=${OPERATOR_GIT_REF:-}"
   echo "MAAS_MANIFEST_REPO_URL=${MAAS_MANIFEST_REPO_URL:-}"
   echo "MAAS_MANIFEST_RESOLVED_REF=${MAAS_RESOLVED_REF:-}"
+  echo "MAAS_CONTROLLER_IMAGE_EFFECTIVE=${MAAS_CONTROLLER_IMAGE_EFFECTIVE:-}"
+  echo "MAAS_API_IMAGE_EFFECTIVE=${MAAS_API_IMAGE_EFFECTIVE:-}"
   echo "IMG_TAG=${IMG_TAG}"
   echo "UNIFIED_IMAGE_TAG=${UNIFIED_IMAGE_TAG:-}"
   echo "VERSION=${VERSION_RESOLVED}"
