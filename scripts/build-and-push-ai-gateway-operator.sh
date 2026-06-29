@@ -15,10 +15,13 @@
 #   IMG_TAG                Image tag when UNIFIED_IMAGE_TAG is unset (default: latest)
 #   AI_GATEWAY_REPO_URL    Clone URL (default: upstream GitHub)
 #   AI_GATEWAY_GIT_REF     Branch, tag, or commit (default: main)
-#   CLONE_DIR              Clone destination (default: ./ai-gateway-operator)
+#   AI_GATEWAY_CLONE_DIR   Clone destination (default: ./ai-gateway-operator; CLONE_DIR legacy alias)
 #   SKIP_GET_MANIFESTS     If 1, skip make get-manifests
 #   IMAGE_BUILDER          podman or docker (default: podman)
-#   BUILD_OUTPUT_ENV       Path for KEY=value summary (default: <repo>/ai-gateway-build-output.env)
+#   MAAS_REPO_URL / MAAS_GIT_REF  Override maascontroller pin in hack/scripts/get-manifests.sh
+#                                 (required for Somya ai-gateway PR #29; use Ryan fork for #1025)
+#   USE_LOCAL                     If true, copy from ../models-as-a-service adjacent checkout
+#   MAAS_CLONE_DIR                Local clone for USE_LOCAL (default: <repo>/models-as-a-service)
 #
 set -euo pipefail
 
@@ -32,7 +35,7 @@ resolve_unified_image_tag
 
 AI_GATEWAY_REPO_URL="${AI_GATEWAY_REPO_URL:-https://github.com/opendatahub-io/ai-gateway-operator.git}"
 AI_GATEWAY_GIT_REF="${AI_GATEWAY_GIT_REF:-main}"
-CLONE_DIR="${CLONE_DIR:-./ai-gateway-operator}"
+AI_GATEWAY_CLONE_DIR="${AI_GATEWAY_CLONE_DIR:-${CLONE_DIR:-./ai-gateway-operator}}"
 SKIP_GET_MANIFESTS="${SKIP_GET_MANIFESTS:-0}"
 IMAGE_BUILDER="${IMAGE_BUILDER:-podman}"
 
@@ -42,8 +45,8 @@ ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_OUTPUT_ENV="${BUILD_OUTPUT_ENV:-${ROOT}/ai-gateway-build-output.env}"
 cd "${ROOT}"
 
-clone_git_repo "${AI_GATEWAY_REPO_URL}" "${AI_GATEWAY_GIT_REF}" "${CLONE_DIR}"
-cd "${CLONE_DIR}"
+clone_git_repo "${AI_GATEWAY_REPO_URL}" "${AI_GATEWAY_GIT_REF}" "${AI_GATEWAY_CLONE_DIR}"
+cd "${AI_GATEWAY_CLONE_DIR}"
 
 login_registry_hosts "${IMAGE_BUILDER}" "${QUAY_USERNAME:-}" "${QUAY_PASSWORD:-}" "${AI_GATEWAY_IMAGE_REPO}"
 
@@ -53,6 +56,7 @@ export IMG="${AI_GATEWAY_IMAGE}"
 
 if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
   echo "Fetching sub-component manifests (make get-manifests)..."
+  prepare_ai_gateway_maas_manifests "$(pwd)" "${ROOT}"
   make get-manifests
 else
   echo "Skipping get-manifests"
@@ -66,6 +70,9 @@ make container-build container-push
   echo "AI_GATEWAY_IMAGE_REPO=${AI_GATEWAY_IMAGE_REPO}"
   echo "AI_GATEWAY_REPO_URL=${AI_GATEWAY_REPO_URL}"
   echo "AI_GATEWAY_GIT_REF=${AI_GATEWAY_GIT_REF}"
+  echo "MAAS_REPO_URL=${MAAS_REPO_URL:-${MAAS_MANIFEST_REPO_URL:-}}"
+  echo "MAAS_GIT_REF=${MAAS_GIT_REF:-${MAAS_MANIFEST_REF:-}}"
+  echo "AI_GATEWAY_MAAS_MANIFEST_REF=${AI_GATEWAY_MAAS_MANIFEST_REF:-}"
   echo "IMG_TAG=${IMG_TAG}"
   echo "UNIFIED_IMAGE_TAG=${UNIFIED_IMAGE_TAG:-}"
 } | tee "${BUILD_OUTPUT_ENV}"

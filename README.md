@@ -61,12 +61,8 @@ Workflow dispatch inputs mirror these (leave empty to use variables). Legacy `MA
 export UNIFIED_IMAGE_TAG=v3.4.0   # optional; same tag on all images
 
 # Optional component sources (repo + ref only):
-# export OPERATOR_REPO_URL=https://github.com/myorg/opendatahub-operator.git
-# export OPERATOR_GIT_REF=feature-branch
-# export AI_GATEWAY_REPO_URL=https://github.com/opendatahub-io/ai-gateway-operator.git
-# export AI_GATEWAY_GIT_REF=main
-# export MAAS_REPO_URL=https://github.com/opendatahub-io/maas-billing
-# export MAAS_GIT_REF=main
+# export MAAS_REPO_URL=https://github.com/ryancham715/models-as-a-service
+# export MAAS_GIT_REF=rq-66772   # required for Somya ai-gateway PR #29 (broken maas pin)
 
 ./scripts/build-odh-stack.sh
 ```

@@ -49,6 +49,8 @@ resolve_unified_image_tag() {
 
 clone_git_repo() {
   local repo_url="$1" git_ref="$2" clone_dir="$3"
+  local norm_expected norm_current
+  norm_expected="$(echo "${repo_url%.git}" | tr '[:upper:]' '[:lower:]')"
   if [[ ! -d "${clone_dir}/.git" ]]; then
     rm -rf "${clone_dir}"
     git clone --depth 1 --branch "${git_ref}" "${repo_url}" "${clone_dir}" 2>/dev/null || {
@@ -57,8 +59,15 @@ clone_git_repo() {
       git -C "${clone_dir}" checkout "${git_ref}"
     }
   else
+    norm_current="$(git -C "${clone_dir}" remote get-url origin 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+    norm_current="${norm_current%.git}"
+    if [[ -n "${norm_current}" && "${norm_current}" != "${norm_expected}" ]]; then
+      echo "ERROR: ${clone_dir} is ${norm_current}, expected ${norm_expected}" >&2
+      echo "       Use a separate clone dir (OPERATOR_CLONE_DIR / AI_GATEWAY_CLONE_DIR) or remove ${clone_dir}." >&2
+      return 1
+    fi
     echo "Using existing clone at ${clone_dir}"
-    git -C "${clone_dir}" fetch origin
+    git -C "${clone_dir}" fetch origin "${git_ref}" 2>/dev/null || git -C "${clone_dir}" fetch origin
     git -C "${clone_dir}" checkout "${git_ref}"
     git -C "${clone_dir}" pull --ff-only 2>/dev/null || true
   fi
@@ -163,6 +172,67 @@ run_make_with_retry() {
     sleep "${delay}"
     n=$((n + 1))
   done
+}
+
+# Patch ai-gateway-operator hack/scripts/get-manifests.sh maascontroller pin (Somya PR #29 pins a
+# missing SHA). Set MAAS_REPO_URL + MAAS_GIT_REF (or USE_LOCAL=true with ../models-as-a-service).
+prepare_ai_gateway_maas_manifests() {
+  local gw_root="${1:?}"
+  local repo_root="${2:?}"
+  local manifests_script="${gw_root}/hack/scripts/get-manifests.sh"
+  [[ -f "${manifests_script}" ]] || return 0
+  grep -q 'maascontroller' "${manifests_script}" || return 0
+
+  local maas_url="${MAAS_REPO_URL:-${MAAS_MANIFEST_REPO_URL:-}}"
+  local maas_ref="${MAAS_GIT_REF:-${MAAS_MANIFEST_REF:-}}"
+  if [[ -z "${maas_ref}" && -z "${maas_url}" ]]; then
+    echo "NOTE: ${manifests_script} includes maascontroller with a pinned commit." >&2
+    echo "      If get-manifests fails with 'not our ref', set:" >&2
+    echo "        MAAS_REPO_URL=https://github.com/ryancham715/models-as-a-service" >&2
+    echo "        MAAS_GIT_REF=rq-66772   # Ryan PR #1025" >&2
+    return 0
+  fi
+
+  local org="opendatahub-io" repo="models-as-a-service"
+  local clone_url="${maas_url}"
+  if [[ -n "${maas_url}" ]]; then
+    parse_github_repo_url "${maas_url}" || exit 1
+    org="${GITHUB_ORG}"
+    repo="${GITHUB_REPO}"
+    clone_url="${maas_url}"
+  else
+    clone_url="https://github.com/${org}/${repo}.git"
+  fi
+
+  local resolved_ref="${maas_ref:-main}"
+  if [[ "${resolved_ref}" =~ ^[a-f0-9]{7,40}$ ]]; then
+    :
+  elif [[ "${resolved_ref}" == *@* ]]; then
+    :
+  else
+    local sha
+    sha="$(resolve_branch_head_sha "${org}" "${repo}" "${resolved_ref}")"
+    if [[ -z "${sha}" ]]; then
+      echo "ERROR: could not resolve ${org}/${repo} ref ${resolved_ref}" >&2
+      exit 1
+    fi
+    resolved_ref="${sha}"
+  fi
+
+  if [[ "${org}" != "opendatahub-io" ]] || [[ "${USE_LOCAL:-}" == "true" ]]; then
+    # get-manifests.sh USE_LOCAL copies from ${PROJECT_ROOT}/../models-as-a-service (sibling of ai-gateway clone).
+    local maas_clone="${MAAS_CLONE_DIR:-$(dirname "${gw_root}")/models-as-a-service}"
+    clone_git_repo "${clone_url}" "${maas_ref:-main}" "${maas_clone}"
+    export USE_LOCAL=true
+    echo "Using USE_LOCAL=true for maascontroller manifests from ${maas_clone} @ ${maas_ref:-main}"
+  fi
+
+  echo "Patching ${manifests_script} maascontroller pin → ${resolved_ref}..."
+  git -C "${gw_root}" checkout -- hack/scripts/get-manifests.sh 2>/dev/null || true
+  _MAAS_PIN="${resolved_ref}" perl -i -pe \
+    's/^(\s*\[maascontroller\]="models-as-a-service\|deployment\/base\/maas-controller\|)[^|]+(\|)[^"]+/$1$ENV{_MAAS_PIN}$2$ENV{_MAAS_PIN}/' \
+    "${manifests_script}"
+  export AI_GATEWAY_MAAS_MANIFEST_REF="${resolved_ref}"
 }
 
 # Emit YAML + oc hints for installing the built FBC catalog on OpenShift.

@@ -22,6 +22,7 @@ AI_GATEWAY_IMAGE_REPO="${AI_GATEWAY_IMAGE_REPO:-${QUAY_AI_GATEWAY_REPO:-quay.io/
 
 export AI_GATEWAY_IMAGE_REPO
 export BUILD_OUTPUT_ENV="${ROOT}/ai-gateway-build-output.env"
+unset CLONE_DIR
 "${SCRIPT_DIR}/build-and-push-ai-gateway-operator.sh"
 
 set -a

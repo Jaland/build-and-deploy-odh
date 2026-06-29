@@ -26,7 +26,7 @@
 #                     bundle/catalog unless UNIFIED_IMAGE_TAG is set.
 #   OPERATOR_GIT_REF  Branch, tag, or commit to build (default: main)
 #   OPERATOR_REPO_URL Clone URL (default: upstream GitHub)
-#   CLONE_DIR         Where to clone the operator repo (default: ./opendatahub-operator)
+#   OPERATOR_CLONE_DIR  Clone destination (default: ./opendatahub-operator; CLONE_DIR legacy alias)
 #   SKIP_GET_MANIFESTS  If 1, skip make get-manifests (not recommended for release-like builds)
 #   DEPLOY_BUNDLE     If 1, run operator-sdk run bundle after push (needs oc/kubectl + kubeconfig)
 #   OPERATOR_NAMESPACE Namespace for bundle install (default: opendatahub-operator-system)
@@ -89,7 +89,7 @@ IMG_TAG="${IMG_TAG:-latest}"
 resolve_unified_image_tag
 OPERATOR_GIT_REF="${OPERATOR_GIT_REF:-main}"
 OPERATOR_REPO_URL="${OPERATOR_REPO_URL:-https://github.com/opendatahub-io/opendatahub-operator.git}"
-CLONE_DIR="${CLONE_DIR:-./opendatahub-operator}"
+OPERATOR_CLONE_DIR="${OPERATOR_CLONE_DIR:-${CLONE_DIR:-./opendatahub-operator}}"
 SKIP_GET_MANIFESTS="${SKIP_GET_MANIFESTS:-0}"
 DEPLOY_BUNDLE="${DEPLOY_BUNDLE:-0}"
 OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-opendatahub-operator-system}"
@@ -102,21 +102,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_OUTPUT_ENV="${BUILD_OUTPUT_ENV:-${ROOT}/build-output.env}"
 cd "$ROOT"
 
-if [[ ! -d "$CLONE_DIR/.git" ]]; then
-  rm -rf "$CLONE_DIR"
-  git clone --depth 1 --branch "$OPERATOR_GIT_REF" "$OPERATOR_REPO_URL" "$CLONE_DIR" 2>/dev/null || {
-    git clone "$OPERATOR_REPO_URL" "$CLONE_DIR"
-    git -C "$CLONE_DIR" fetch --depth 1 origin "$OPERATOR_GIT_REF"
-    git -C "$CLONE_DIR" checkout "$OPERATOR_GIT_REF"
-  }
-else
-  echo "Using existing clone at $CLONE_DIR"
-  git -C "$CLONE_DIR" fetch origin
-  git -C "$CLONE_DIR" checkout "$OPERATOR_GIT_REF"
-  git -C "$CLONE_DIR" pull --ff-only 2>/dev/null || true
-fi
-
-cd "$CLONE_DIR"
+clone_git_repo "${OPERATOR_REPO_URL}" "${OPERATOR_GIT_REF}" "${OPERATOR_CLONE_DIR}"
+cd "${OPERATOR_CLONE_DIR}"
 
 prepare_operator_go_build "$(pwd)"
 
