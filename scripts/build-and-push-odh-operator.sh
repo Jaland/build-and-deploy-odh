@@ -6,9 +6,9 @@
 # from https://github.com/opendatahub-io/opendatahub-operator
 #
 # Required env:
-#   IMAGE_TAG_BASE  Full image path without tag for the operator image, e.g. quay.io/myorg/opendatahub-operator
-#   QUAY_USERNAME   Registry user (registry login; same creds for operator, bundle, catalog)
-#   QUAY_PASSWORD   Registry password or robot token
+#   IMAGE_TAG_BASE  Full image path without tag for the operator image (default: quay.io/maas/opendatahub-operator)
+#   QUAY_USERNAME   Registry user (optional if already logged in via podman/docker login)
+#   QUAY_PASSWORD   Registry password or robot token (optional with existing login)
 #
 # Optional env:
 #   BUNDLE_REPO     Separate OLM bundle image path without tag (e.g. quay.io/myorg/odh-operator-bundle).
@@ -32,7 +32,11 @@
 #   OPERATOR_NAMESPACE Namespace for bundle install (default: opendatahub-operator-system)
 #   OLM_DECOMPRESSION_IMAGE Image for operator-sdk bundle unpack (default from upstream README)
 #   IMAGE_BUILDER     podman or docker (default: podman)
-#   BUILD_OUTPUT_ENV  Path for KEY=value summary (default: <repo>/build-output.env)
+#   GOPROXY / GOSUMDB     Go module proxy and checksum DB (defaults: proxy.golang.org, sum.golang.org).
+#                         Set GOSUMDB=off if sum.golang.org is unreachable from your network.
+#   BUNDLE_BUILD_NO_CACHE If 1, keep upstream bundle-build --no-cache (default: allow layer cache).
+#   MAKE_RETRY_ATTEMPTS   Retries for bundle-build on transient network errors (default: 3).
+#
 #   MANIFEST_ARTIFACT_DIR  After get-manifests, copies get_all_manifests.sh + maas-fetch-effective.txt here
 #                       (default: <repo>/manifest-validation) for CI artifacts / local inspection.
 #
@@ -52,9 +56,17 @@
 #   MAAS_MANIFEST_REPO        maas-billing
 #   MAAS_MANIFEST_REF         main   (branch, tag, or main@sha)
 #   MAAS_MANIFEST_SOURCE_PATH deployment
+#   MAAS_REPO_URL           Simplified MaaS source: GitHub HTTPS URL (sets org/repo; use with MAAS_GIT_REF).
+#   MAAS_GIT_REF            Branch or ref for MAAS (default main when MAAS_REPO_URL is set).
+#   MAAS_SOURCE_PATH        Folder in MaaS repo (default deployment). Used with MAAS_REPO_URL.
 #   MAAS_MANIFEST_REPO_URL    Optional GitHub HTTPS URL for the MaaS repo (e.g. https://github.com/org/models-as-a-service).
 #                             If set, MAAS_MANIFEST_ORG and MAAS_MANIFEST_REPO are derived from it (overrides those env vars).
 #                             Upstream get_all_manifests.sh clones from github.com only.
+#   AI Gateway (module operator manifests + optional built image):
+#   AI_GATEWAY_REPO_URL     Clone URL for ai-gateway-operator (default upstream).
+#   AI_GATEWAY_GIT_REF      Branch/tag/commit for --aigateway= override (default main).
+#   AI_GATEWAY_IMAGE        Full image ref for the module operator (patches opt/manifests/aigateway/manager/kustomization.yaml).
+#                             Set automatically when using build-odh-stack.sh after the AI Gateway image build.
 #   DASHBOARD_USE_MAIN       If 1/true, fetch ODH dashboard from branch main (opendatahub-io:odh-dashboard:main:manifests).
 #                            Rewrites ODH ["dashboard"] in get_all_manifests.sh and passes --dashboard=... (OpenDataHub only).
 #   ODH_PLATFORM_TYPE   OpenDataHub (default) or rhoai — selects which base manifest map is used before override
@@ -68,24 +80,13 @@
 #
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/component-ref.sh
+source "${SCRIPT_DIR}/lib/component-ref.sh"
+
+ensure_go_toolchain
 IMG_TAG="${IMG_TAG:-latest}"
-UNIFIED_IMAGE_TAG="${UNIFIED_IMAGE_TAG:-}"
-if [[ -n "${UNIFIED_IMAGE_TAG}" ]]; then
-  raw="${UNIFIED_IMAGE_TAG}"
-  if [[ "${raw}" =~ ^v[0-9] ]]; then
-    olm_tag="${raw}"
-    VERSION="${raw#v}"
-  elif [[ "${raw}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)? ]]; then
-    olm_tag="v${raw}"
-    VERSION="${raw}"
-  else
-    echo "ERROR: UNIFIED_IMAGE_TAG must be semver vX.Y.Z or X.Y.Z (e.g. v3.4.0 or 3.4.0); got: ${raw}" >&2
-    exit 1
-  fi
-  UNIFIED_IMAGE_TAG="${olm_tag}"
-  IMG_TAG="${olm_tag}"
-  export VERSION
-fi
+resolve_unified_image_tag
 OPERATOR_GIT_REF="${OPERATOR_GIT_REF:-main}"
 OPERATOR_REPO_URL="${OPERATOR_REPO_URL:-https://github.com/opendatahub-io/opendatahub-operator.git}"
 CLONE_DIR="${CLONE_DIR:-./opendatahub-operator}"
@@ -95,14 +96,7 @@ OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-opendatahub-operator-system}"
 IMAGE_BUILDER="${IMAGE_BUILDER:-podman}"
 OLM_DECOMPRESSION_IMAGE="${OLM_DECOMPRESSION_IMAGE:-quay.io/project-codeflare/busybox:1.36}"
 
-if [[ -z "${IMAGE_TAG_BASE:-}" ]]; then
-  echo "ERROR: IMAGE_TAG_BASE is required (e.g. quay.io/myorg/opendatahub-operator)" >&2
-  exit 1
-fi
-if [[ -z "${QUAY_USERNAME:-}" || -z "${QUAY_PASSWORD:-}" ]]; then
-  echo "ERROR: QUAY_USERNAME and QUAY_PASSWORD are required" >&2
-  exit 1
-fi
+IMAGE_TAG_BASE="${IMAGE_TAG_BASE:-${QUAY_REPO:-quay.io/maas/opendatahub-operator}}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_OUTPUT_ENV="${BUILD_OUTPUT_ENV:-${ROOT}/build-output.env}"
@@ -124,22 +118,18 @@ fi
 
 cd "$CLONE_DIR"
 
+prepare_operator_go_build "$(pwd)"
+
 maas_override=""
 MAAS_RESOLVED_REF=""
+aigateway_override=""
+AI_GATEWAY_IMAGE_EFFECTIVE=""
 dashboard_override=""
 MAAS_CONTROLLER_IMAGE_EFFECTIVE=""
 MAAS_API_IMAGE_EFFECTIVE=""
 
-# Log in once per registry host (operator/bundle and optional catalog may use different repos or hosts).
-login_registry_hosts() {
-  local host
-  while IFS= read -r host; do
-    [[ -z "${host}" ]] && continue
-    echo "Logging in to ${host}..."
-    echo "${QUAY_PASSWORD}" | "${IMAGE_BUILDER}" login "${host}" -u "${QUAY_USERNAME}" --password-stdin
-  done < <(for ref in "$@"; do [[ -z "${ref}" ]] && continue; echo "${ref%%/*}"; done | sort -u)
-}
-login_registry_hosts "${IMAGE_TAG_BASE}" "${BUNDLE_REPO:-}" "${CATALOG_REPO:-}"
+login_registry_hosts "${IMAGE_BUILDER}" "${QUAY_USERNAME:-}" "${QUAY_PASSWORD:-}" \
+  "${IMAGE_TAG_BASE}" "${BUNDLE_REPO:-}" "${CATALOG_REPO:-}"
 
 export IMAGE_BUILDER
 
@@ -152,32 +142,41 @@ fi
 # Upstream: https://github.com/opendatahub-io/opendatahub-operator/blob/main/get_all_manifests.sh
 # Optional --maas=org:repo:ref:path overrides the default opendatahub-io:maas-billing:main:deployment.
 
-# If MAAS_MANIFEST_REPO_URL is set, set MAAS_MANIFEST_ORG and MAAS_MANIFEST_REPO (GitHub HTTPS only; upstream clones github.com).
+# Simplified MAAS_REPO_URL + MAAS_GIT_REF, or legacy MAAS_MANIFEST_REPO_URL / MAAS_MANIFEST_* .
 apply_maas_manifest_repo_url() {
-  local url="${MAAS_MANIFEST_REPO_URL:-}"
+  local url="${MAAS_REPO_URL:-${MAAS_MANIFEST_REPO_URL:-}}"
   [[ -z "${url}" ]] && return 0
-  if [[ "${url}" =~ ^https?://github\.com/([^/]+)/([^/[:space:]]+) ]]; then
-    export MAAS_MANIFEST_ORG="${BASH_REMATCH[1]}"
-    local r="${BASH_REMATCH[2]}"
-    r="${r%.git}"
-    export MAAS_MANIFEST_REPO="${r}"
-    echo "MAAS_MANIFEST_REPO_URL=${url} → MAAS_MANIFEST_ORG=${MAAS_MANIFEST_ORG} MAAS_MANIFEST_REPO=${MAAS_MANIFEST_REPO}"
+  if parse_github_repo_url "${url}"; then
+    export MAAS_MANIFEST_ORG="${GITHUB_ORG}"
+    export MAAS_MANIFEST_REPO="${GITHUB_REPO}"
+    echo "MaaS repo URL ${url} → MAAS_MANIFEST_ORG=${MAAS_MANIFEST_ORG} MAAS_MANIFEST_REPO=${MAAS_MANIFEST_REPO}"
   else
-    echo "ERROR: MAAS_MANIFEST_REPO_URL must be a GitHub HTTPS URL, e.g. https://github.com/opendatahub-io/models-as-a-service or https://github.com/org/repo.git — got: ${url}" >&2
     exit 1
   fi
 }
 
-resolve_branch_head_sha() {
-  local org="$1" repo="$2" branch="$3"
-  git ls-remote "https://github.com/${org}/${repo}.git" "refs/heads/${branch}" 2>/dev/null | awk '{print $1}'
+build_aigateway_manifest_override() {
+  local url="${AI_GATEWAY_REPO_URL:-https://github.com/opendatahub-io/ai-gateway-operator.git}"
+  local ref="${AI_GATEWAY_GIT_REF:-main}"
+  if ! parse_github_repo_url "${url}"; then
+    exit 1
+  fi
+  build_component_override "${GITHUB_ORG}" "${GITHUB_REPO}" "${ref}" "config"
+}
+
+apply_aigateway_line_to_get_all_manifests_file() {
+  local override="$1"
+  local f="get_all_manifests.sh"
+  [[ -f "${f}" ]] || return 0
+  echo "Rewriting ODH [\"aigateway\"] line in ${f} on disk to match --aigateway= (${override})..."
+  AIGATEWAY_OVERRIDE="$override" perl -i -pe 's/^(\s*\["aigateway"\]=")opendatahub-io:[^"]+/$1$ENV{AIGATEWAY_OVERRIDE}/' "${f}"
 }
 
 build_maas_manifest_override() {
   local org="${MAAS_MANIFEST_ORG:-opendatahub-io}"
   local repo="${MAAS_MANIFEST_REPO:-maas-billing}"
-  local path="${MAAS_MANIFEST_SOURCE_PATH:-deployment}"
-  local ref="${MAAS_MANIFEST_REF:-main}"
+  local path="${MAAS_SOURCE_PATH:-${MAAS_MANIFEST_SOURCE_PATH:-deployment}}"
+  local ref="${MAAS_GIT_REF:-${MAAS_MANIFEST_REF:-main}}"
   if [[ "${MAAS_MANIFEST_PIN_LATEST:-}" == "1" || "${MAAS_MANIFEST_PIN_LATEST:-}" == "true" ]]; then
     if [[ "${ref}" != "main" ]]; then
       echo "ERROR: MAAS_MANIFEST_PIN_LATEST requires MAAS_MANIFEST_REF=main" >&2
@@ -247,6 +246,58 @@ validate_dashboard_manifests() {
     exit 1
   fi
   echo "Validated dashboard manifests: ${d} (${n} file(s))"
+}
+
+apply_aigateway_image_override() {
+  local image="${AI_GATEWAY_IMAGE:-}"
+  [[ -z "${image}" ]] && return 0
+  local kust="opt/manifests/aigateway/manager/kustomization.yaml"
+  [[ -f "${kust}" ]] || {
+    echo "ERROR: AI_GATEWAY_IMAGE set but missing ${kust} after get_all_manifests.sh" >&2
+    exit 1
+  }
+  AI_GATEWAY_IMAGE_EFFECTIVE="${image}"
+  _AIGW_KUST="${kust}" _AIGW_IMG="${image}" python3 - <<'PY'
+import os, pathlib, re, sys
+
+def parse_ref(s: str):
+    s = (s or "").strip()
+    if not s:
+        return None
+    if "@" in s:
+        base, _, qual = s.rpartition("@")
+        if qual.startswith(("sha256:", "sha512:")):
+            return (base, None, qual)
+    slash = s.rfind("/")
+    colon = s.rfind(":")
+    if colon > slash:
+        return (s[:colon], s[colon + 1 :], None)
+    return (s, "latest", None)
+
+path = pathlib.Path(os.environ["_AIGW_KUST"])
+parsed = parse_ref(os.environ["_AIGW_IMG"])
+if not parsed:
+    sys.exit(1)
+new_name, new_tag, digest = parsed
+text = path.read_text()
+pat = re.compile(
+    r"^([ \t]*- name: controller\n)((?:[ \t]+(?:newName|newTag|digest):[^\n]+\n)+)",
+    re.MULTILINE,
+)
+m = pat.search(text)
+if not m:
+    print(f"ERROR: could not find images: entry '- name: controller' in {path}", file=sys.stderr)
+    sys.exit(1)
+head = m.group(1)
+ind_m = re.search(r"^([ \t]+)newName:", m.group(2), re.MULTILINE)
+ind = ind_m.group(1) if ind_m else "  "
+if digest:
+    block = f"{head}{ind}newName: {new_name}\n{ind}digest: {digest}\n"
+else:
+    block = f"{head}{ind}newName: {new_name}\n{ind}newTag: {new_tag}\n"
+path.write_text(text[: m.start()] + block + text[m.end() :])
+print(f"Patched AI Gateway operator image in {path} ← {os.environ['_AIGW_IMG']!r}")
+PY
 }
 
 # Patch models-as-a-service kustomize image newName/newTag (or digest) under opt/manifests/maas/ (see MAAS_*_IMAGE env).
@@ -337,6 +388,11 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
     echo "MaaS manifests: https://github.com/${org}/${repo} @ ${ref_resolved} (path: ${path}/) — --maas=${maas_override}"
     apply_maas_line_to_get_all_manifests_file "${maas_override}"
   fi
+  if [[ -n "${AI_GATEWAY_REPO_URL:-}" || -n "${AI_GATEWAY_GIT_REF:-}" || -n "${AI_GATEWAY_IMAGE:-}" ]]; then
+    aigateway_override="$(build_aigateway_manifest_override)"
+    echo "AI Gateway manifests: --aigateway=${aigateway_override}"
+    apply_aigateway_line_to_get_all_manifests_file "${aigateway_override}"
+  fi
   if [[ "${DASHBOARD_USE_MAIN:-}" == "1" || "${DASHBOARD_USE_MAIN:-}" == "true" ]]; then
     if [[ "${ODH_PLATFORM_TYPE:-OpenDataHub}" != "OpenDataHub" ]]; then
       echo "NOTE: DASHBOARD_USE_MAIN is set but ODH_PLATFORM_TYPE is not OpenDataHub — skipping dashboard main override (RHOAI uses red-hat-data-services pins)."
@@ -349,8 +405,10 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
   VERSION_FOR_MANIFESTS="$(make "${MAKE_ARGS[@]}" -s print-VERSION 2>/dev/null || true)"
   ga_args=()
   [[ -n "${maas_override}" ]] && ga_args+=(--maas="${maas_override}")
+  [[ -n "${aigateway_override}" ]] && ga_args+=(--aigateway="${aigateway_override}")
   [[ -n "${dashboard_override}" ]] && ga_args+=(--dashboard="${dashboard_override}")
   ODH_PLATFORM_TYPE="${ODH_PLATFORM_TYPE}" VERSION="${VERSION_FOR_MANIFESTS}" ./get_all_manifests.sh "${ga_args[@]}"
+  apply_aigateway_image_override
   apply_maas_component_image_overrides
   validate_maas_manifests
   validate_dashboard_manifests
@@ -366,6 +424,11 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
     echo "# When DASHBOARD_USE_MAIN=1, ODH [\"dashboard\"] was rewritten to opendatahub-io:odh-dashboard:main:manifests."
     echo "OPERATOR_REPO_URL=${OPERATOR_REPO_URL:-}"
     echo "OPERATOR_GIT_REF=${OPERATOR_GIT_REF}"
+    echo "AI_GATEWAY_REPO_URL=${AI_GATEWAY_REPO_URL:-}"
+    echo "AI_GATEWAY_GIT_REF=${AI_GATEWAY_GIT_REF:-}"
+    echo "AI_GATEWAY_IMAGE_EFFECTIVE=${AI_GATEWAY_IMAGE_EFFECTIVE:-}"
+    echo "MAAS_REPO_URL=${MAAS_REPO_URL:-${MAAS_MANIFEST_REPO_URL:-}}"
+    echo "MAAS_GIT_REF=${MAAS_GIT_REF:-${MAAS_MANIFEST_REF:-}}"
     echo "MAAS_MANIFEST_REPO_URL=${MAAS_MANIFEST_REPO_URL:-}"
     echo "MAAS_MANIFEST_ORG=${MAAS_MANIFEST_ORG:-}"
     echo "MAAS_MANIFEST_REPO=${MAAS_MANIFEST_REPO:-}"
@@ -376,6 +439,13 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
     else
       echo "MAAS_OVERRIDE="
       echo "GET_ALL_MANIFESTS_ARG_MAAS=(none — MAAS_MANIFEST_USE_UPSTREAM_PIN=1; upstream [\"maas\"] in get_all_manifests.sh applies)"
+    fi
+    if [[ -n "${aigateway_override:-}" ]]; then
+      echo "AIGATEWAY_OVERRIDE=${aigateway_override}"
+      echo "GET_ALL_MANIFESTS_ARG_AIGATEWAY=--aigateway=${aigateway_override}"
+    else
+      echo "AIGATEWAY_OVERRIDE="
+      echo "GET_ALL_MANIFESTS_ARG_AIGATEWAY="
     fi
     if [[ -n "${dashboard_override:-}" ]]; then
       echo "DASHBOARD_OVERRIDE=${dashboard_override}"
@@ -414,7 +484,7 @@ else
 fi
 
 echo "Building and pushing bundle image (${BUNDLE_IMG})..."
-make "${MAKE_ARGS[@]}" BUNDLE_IMG="${BUNDLE_IMG}" bundle-build bundle-push
+run_make_with_retry "${MAKE_ARGS[@]}" BUNDLE_IMG="${BUNDLE_IMG}" bundle-build bundle-push
 
 echo "Building and pushing catalog image (${CATALOG_IMG})..."
 make "${MAKE_ARGS[@]}" BUNDLE_IMGS="${BUNDLE_IMG}" CATALOG_IMG="${CATALOG_IMG}" catalog-build catalog-push
@@ -437,6 +507,8 @@ MAAS_DEPLOY_SNIPPET="# OLM bundle image (indexed by the catalog above): ${BUNDLE
 # Subscription startingCSV (matches bundle CSV): ${OPERATOR_STARTING_CSV}
 ${MAAS_DEPLOY_COMMAND}"
 
+OPENSHIFT_CATALOG_SNIPPET="$(build_openshift_catalog_snippet "${CATALOG_IMG}" "${OPERATOR_STARTING_CSV}" "${OPERATOR_CSV_PACKAGE}" "fast")"
+
 {
   echo "OPERATOR_IMAGE=${OPERATOR_IMG}"
   echo "BUNDLE_IMAGE=${BUNDLE_IMG}"
@@ -445,9 +517,16 @@ ${MAAS_DEPLOY_COMMAND}"
   echo "BUNDLE_REPO=${BUNDLE_REPO:-}"
   echo "CATALOG_REPO=${CATALOG_REPO:-}"
   echo "MAAS_OVERRIDE=${maas_override:-}"
+  echo "AIGATEWAY_OVERRIDE=${aigateway_override:-}"
   echo "DASHBOARD_OVERRIDE=${dashboard_override:-}"
   echo "OPERATOR_REPO_URL=${OPERATOR_REPO_URL:-}"
   echo "OPERATOR_GIT_REF=${OPERATOR_GIT_REF:-}"
+  echo "AI_GATEWAY_REPO_URL=${AI_GATEWAY_REPO_URL:-}"
+  echo "AI_GATEWAY_GIT_REF=${AI_GATEWAY_GIT_REF:-}"
+  echo "AI_GATEWAY_IMAGE=${AI_GATEWAY_IMAGE:-}"
+  echo "AI_GATEWAY_IMAGE_EFFECTIVE=${AI_GATEWAY_IMAGE_EFFECTIVE:-}"
+  echo "MAAS_REPO_URL=${MAAS_REPO_URL:-${MAAS_MANIFEST_REPO_URL:-}}"
+  echo "MAAS_GIT_REF=${MAAS_GIT_REF:-${MAAS_MANIFEST_REF:-}}"
   echo "MAAS_MANIFEST_REPO_URL=${MAAS_MANIFEST_REPO_URL:-}"
   echo "MAAS_MANIFEST_RESOLVED_REF=${MAAS_RESOLVED_REF:-}"
   echo "MAAS_CONTROLLER_IMAGE_EFFECTIVE=${MAAS_CONTROLLER_IMAGE_EFFECTIVE:-}"
@@ -462,6 +541,7 @@ ${MAAS_DEPLOY_COMMAND}"
   # Shell-quote so `source build-output.env` does not treat --flags as commands
   printf 'MAAS_DEPLOY_COMMAND=%q\n' "${MAAS_DEPLOY_COMMAND}"
   printf 'MAAS_DEPLOY_SNIPPET=%q\n' "${MAAS_DEPLOY_SNIPPET}"
+  printf 'OPENSHIFT_CATALOG_SNIPPET=%q\n' "${OPENSHIFT_CATALOG_SNIPPET}"
 } | tee "$BUILD_OUTPUT_ENV"
 
 echo ""
@@ -470,6 +550,9 @@ echo "Operator image: ${OPERATOR_IMG}"
 echo "Bundle image:   ${BUNDLE_IMG}"
 echo "Catalog image:  ${CATALOG_IMG}"
 echo "===================================="
+echo ""
+echo "OpenShift custom catalog (save as odh-custom-catalog.yaml, then: oc apply -f odh-custom-catalog.yaml):"
+echo "${OPENSHIFT_CATALOG_SNIPPET}"
 echo ""
 echo "MaaS / Models-as-a-Service deploy (from a maas-billing clone):"
 echo "  # OLM bundle image (indexed by catalog): ${BUNDLE_IMG}"
