@@ -26,7 +26,8 @@
 #                     bundle/catalog unless UNIFIED_IMAGE_TAG is set.
 #   OPERATOR_GIT_REF  Branch, tag, or commit to build (default: main)
 #   OPERATOR_REPO_URL Clone URL (default: upstream GitHub)
-#   OPERATOR_CLONE_DIR  Clone destination (default: ./opendatahub-operator; CLONE_DIR legacy alias)
+#   CLONE_BASE_DIR      Parent for all clones (default: /tmp → .../opendatahub-operator, etc.)
+#   OPERATOR_CLONE_DIR  Override ODH operator clone path (default: ${CLONE_BASE_DIR}/opendatahub-operator)
 #   SKIP_GET_MANIFESTS  If 1, skip make get-manifests (not recommended for release-like builds)
 #   DEPLOY_BUNDLE     If 1, run operator-sdk run bundle after push (needs oc/kubectl + kubeconfig)
 #   OPERATOR_NAMESPACE Namespace for bundle install (default: opendatahub-operator-system)
@@ -65,8 +66,14 @@
 #   AI Gateway (module operator manifests + optional built image):
 #   AI_GATEWAY_REPO_URL     Clone URL for ai-gateway-operator (default upstream).
 #   AI_GATEWAY_GIT_REF      Branch/tag/commit for --aigateway= override (default main).
-#   AI_GATEWAY_IMAGE        Full image ref for the module operator (patches opt/manifests/aigateway/manager/kustomization.yaml).
+#   AI_GATEWAY_IMAGE        Full image ref for the module operator. Patches
+#                             opt/manifests/aigateway/manifests/ai-gateway-operator/base/params.env
+#                             (used by the module handler kustomize replacements) and
+#                             opt/manifests/aigateway/manager/kustomization.yaml for consistency.
 #                             Set automatically when using build-odh-stack.sh after the AI Gateway image build.
+#   USE_LOCAL               Passed to make image (default: true when get-manifests runs). The operator
+#                             Dockerfile re-runs get_all_manifests.sh unless USE_LOCAL=true, which would
+#                             discard host-side manifest/image patches baked into opt/manifests/.
 #   DASHBOARD_USE_MAIN       If 1/true, fetch ODH dashboard from branch main (opendatahub-io:odh-dashboard:main:manifests).
 #                            Rewrites ODH ["dashboard"] in get_all_manifests.sh and passes --dashboard=... (OpenDataHub only).
 #   ODH_PLATFORM_TYPE   OpenDataHub (default) or rhoai — selects which base manifest map is used before override
@@ -89,7 +96,8 @@ IMG_TAG="${IMG_TAG:-latest}"
 resolve_unified_image_tag
 OPERATOR_GIT_REF="${OPERATOR_GIT_REF:-main}"
 OPERATOR_REPO_URL="${OPERATOR_REPO_URL:-https://github.com/opendatahub-io/opendatahub-operator.git}"
-OPERATOR_CLONE_DIR="${OPERATOR_CLONE_DIR:-${CLONE_DIR:-./opendatahub-operator}}"
+OPERATOR_CLONE_DIR="$(resolve_operator_clone_dir)"
+export OPERATOR_CLONE_DIR CLONE_BASE_DIR
 SKIP_GET_MANIFESTS="${SKIP_GET_MANIFESTS:-0}"
 DEPLOY_BUNDLE="${DEPLOY_BUNDLE:-0}"
 OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-opendatahub-operator-system}"
@@ -238,12 +246,29 @@ validate_dashboard_manifests() {
 apply_aigateway_image_override() {
   local image="${AI_GATEWAY_IMAGE:-}"
   [[ -z "${image}" ]] && return 0
-  local kust="opt/manifests/aigateway/manager/kustomization.yaml"
-  [[ -f "${kust}" ]] || {
-    echo "ERROR: AI_GATEWAY_IMAGE set but missing ${kust} after get_all_manifests.sh" >&2
+  local params_env="opt/manifests/aigateway/manifests/ai-gateway-operator/base/params.env"
+  [[ -f "${params_env}" ]] || {
+    echo "ERROR: AI_GATEWAY_IMAGE set but missing ${params_env} after get_all_manifests.sh" >&2
     exit 1
   }
   AI_GATEWAY_IMAGE_EFFECTIVE="${image}"
+  _AIGW_PARAMS="${params_env}" _AIGW_IMG="${image}" python3 - <<'PY'
+import os, pathlib, re, sys
+
+path = pathlib.Path(os.environ["_AIGW_PARAMS"])
+image = os.environ["_AIGW_IMG"].strip()
+text = path.read_text()
+key = "AI_GATEWAY_OPERATOR_IMAGE"
+pat = re.compile(rf"^{re.escape(key)}=.*$", re.MULTILINE)
+if pat.search(text):
+    text = pat.sub(f"{key}={image}", text)
+else:
+    text = text.rstrip("\n") + f"\n{key}={image}\n"
+path.write_text(text)
+print(f"Patched AI Gateway operator image in {path} ← {image!r}")
+PY
+  local kust="opt/manifests/aigateway/manager/kustomization.yaml"
+  [[ -f "${kust}" ]] || return 0
   _AIGW_KUST="${kust}" _AIGW_IMG="${image}" python3 - <<'PY'
 import os, pathlib, re, sys
 
@@ -449,7 +474,15 @@ else
   echo "Skipping get-manifests"
 fi
 
-echo "Building and pushing operator image..."
+# Dockerfile stage re-runs get_all_manifests.sh unless USE_LOCAL=true, wiping opt/manifests/
+# overrides (repo pins, params.env image, etc.) copied from the build host.
+if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
+  USE_LOCAL="${USE_LOCAL:-true}"
+else
+  USE_LOCAL="${USE_LOCAL:-false}"
+fi
+MAKE_ARGS+=(USE_LOCAL="${USE_LOCAL}")
+echo "Building and pushing operator image (USE_LOCAL=${USE_LOCAL})..."
 make "${MAKE_ARGS[@]}" image
 
 VERSION_RESOLVED="$(make "${MAKE_ARGS[@]}" -s print-VERSION)"
@@ -508,6 +541,8 @@ OPENSHIFT_CATALOG_SNIPPET="$(build_openshift_catalog_snippet "${CATALOG_IMG}" "$
   echo "DASHBOARD_OVERRIDE=${dashboard_override:-}"
   echo "OPERATOR_REPO_URL=${OPERATOR_REPO_URL:-}"
   echo "OPERATOR_GIT_REF=${OPERATOR_GIT_REF:-}"
+  echo "CLONE_BASE_DIR=${CLONE_BASE_DIR}"
+  echo "OPERATOR_CLONE_DIR=${OPERATOR_CLONE_DIR}"
   echo "AI_GATEWAY_REPO_URL=${AI_GATEWAY_REPO_URL:-}"
   echo "AI_GATEWAY_GIT_REF=${AI_GATEWAY_GIT_REF:-}"
   echo "AI_GATEWAY_IMAGE=${AI_GATEWAY_IMAGE:-}"

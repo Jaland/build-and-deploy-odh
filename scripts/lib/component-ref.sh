@@ -26,6 +26,49 @@ resolve_branch_head_sha() {
   git ls-remote "https://github.com/${org}/${repo}.git" "refs/heads/${branch}" 2>/dev/null | awk '{print $1}'
 }
 
+# Parent directory for all component git clones (default: /tmp).
+# Layout: ${CLONE_BASE_DIR}/ai-gateway-operator, .../opendatahub-operator, .../models-as-a-service
+# Override per-repo with AI_GATEWAY_CLONE_DIR, OPERATOR_CLONE_DIR, or MAAS_CLONE_DIR.
+resolve_clone_base_dir() {
+  CLONE_BASE_DIR="${CLONE_BASE_DIR:-/tmp}"
+  export CLONE_BASE_DIR
+  mkdir -p "${CLONE_BASE_DIR}"
+}
+
+default_clone_dir() {
+  local name="$1"
+  resolve_clone_base_dir
+  echo "${CLONE_BASE_DIR%/}/${name}"
+}
+
+resolve_ai_gateway_clone_dir() {
+  if [[ -n "${AI_GATEWAY_CLONE_DIR:-}" ]]; then
+    echo "${AI_GATEWAY_CLONE_DIR}"
+  elif [[ -n "${CLONE_DIR:-}" ]]; then
+    echo "${CLONE_DIR}"
+  else
+    default_clone_dir "ai-gateway-operator"
+  fi
+}
+
+resolve_operator_clone_dir() {
+  if [[ -n "${OPERATOR_CLONE_DIR:-}" ]]; then
+    echo "${OPERATOR_CLONE_DIR}"
+  elif [[ -n "${CLONE_DIR:-}" ]]; then
+    echo "${CLONE_DIR}"
+  else
+    default_clone_dir "opendatahub-operator"
+  fi
+}
+
+resolve_maas_clone_dir() {
+  if [[ -n "${MAAS_CLONE_DIR:-}" ]]; then
+    echo "${MAAS_CLONE_DIR}"
+  else
+    default_clone_dir "models-as-a-service"
+  fi
+}
+
 resolve_unified_image_tag() {
   UNIFIED_IMAGE_TAG="${UNIFIED_IMAGE_TAG:-}"
   IMG_TAG="${IMG_TAG:-latest}"
@@ -63,7 +106,7 @@ clone_git_repo() {
     norm_current="${norm_current%.git}"
     if [[ -n "${norm_current}" && "${norm_current}" != "${norm_expected}" ]]; then
       echo "ERROR: ${clone_dir} is ${norm_current}, expected ${norm_expected}" >&2
-      echo "       Use a separate clone dir (OPERATOR_CLONE_DIR / AI_GATEWAY_CLONE_DIR) or remove ${clone_dir}." >&2
+      echo "       Use a separate clone dir (CLONE_BASE_DIR subdirs or *_CLONE_DIR) or remove ${clone_dir}." >&2
       return 1
     fi
     echo "Using existing clone at ${clone_dir}"
@@ -221,7 +264,8 @@ prepare_ai_gateway_maas_manifests() {
 
   if [[ "${org}" != "opendatahub-io" ]] || [[ "${USE_LOCAL:-}" == "true" ]]; then
     # get-manifests.sh USE_LOCAL copies from ${PROJECT_ROOT}/../models-as-a-service (sibling of ai-gateway clone).
-    local maas_clone="${MAAS_CLONE_DIR:-$(dirname "${gw_root}")/models-as-a-service}"
+    local maas_clone
+    maas_clone="$(resolve_maas_clone_dir)"
     clone_git_repo "${clone_url}" "${maas_ref:-main}" "${maas_clone}"
     export USE_LOCAL=true
     echo "Using USE_LOCAL=true for maascontroller manifests from ${maas_clone} @ ${maas_ref:-main}"

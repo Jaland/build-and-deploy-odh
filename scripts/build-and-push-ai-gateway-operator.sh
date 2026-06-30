@@ -15,13 +15,14 @@
 #   IMG_TAG                Image tag when UNIFIED_IMAGE_TAG is unset (default: latest)
 #   AI_GATEWAY_REPO_URL    Clone URL (default: upstream GitHub)
 #   AI_GATEWAY_GIT_REF     Branch, tag, or commit (default: main)
-#   AI_GATEWAY_CLONE_DIR   Clone destination (default: ./ai-gateway-operator; CLONE_DIR legacy alias)
+#   CLONE_BASE_DIR         Parent for all clones (default: /tmp → .../ai-gateway-operator, etc.)
+#   AI_GATEWAY_CLONE_DIR   Override AI Gateway clone path (default: ${CLONE_BASE_DIR}/ai-gateway-operator)
 #   SKIP_GET_MANIFESTS     If 1, skip make get-manifests
 #   IMAGE_BUILDER          podman or docker (default: podman)
 #   MAAS_REPO_URL / MAAS_GIT_REF  Override maascontroller pin in hack/scripts/get-manifests.sh
 #                                 (required for Somya ai-gateway PR #29; use Ryan fork for #1025)
 #   USE_LOCAL                     If true, copy from ../models-as-a-service adjacent checkout
-#   MAAS_CLONE_DIR                Local clone for USE_LOCAL (default: <repo>/models-as-a-service)
+#   MAAS_CLONE_DIR                Local clone for USE_LOCAL (default: ${CLONE_BASE_DIR}/models-as-a-service)
 #
 set -euo pipefail
 
@@ -35,7 +36,8 @@ resolve_unified_image_tag
 
 AI_GATEWAY_REPO_URL="${AI_GATEWAY_REPO_URL:-https://github.com/opendatahub-io/ai-gateway-operator.git}"
 AI_GATEWAY_GIT_REF="${AI_GATEWAY_GIT_REF:-main}"
-AI_GATEWAY_CLONE_DIR="${AI_GATEWAY_CLONE_DIR:-${CLONE_DIR:-./ai-gateway-operator}}"
+AI_GATEWAY_CLONE_DIR="$(resolve_ai_gateway_clone_dir)"
+export AI_GATEWAY_CLONE_DIR CLONE_BASE_DIR
 SKIP_GET_MANIFESTS="${SKIP_GET_MANIFESTS:-0}"
 IMAGE_BUILDER="${IMAGE_BUILDER:-podman}"
 
@@ -70,6 +72,8 @@ make container-build container-push
   echo "AI_GATEWAY_IMAGE_REPO=${AI_GATEWAY_IMAGE_REPO}"
   echo "AI_GATEWAY_REPO_URL=${AI_GATEWAY_REPO_URL}"
   echo "AI_GATEWAY_GIT_REF=${AI_GATEWAY_GIT_REF}"
+  echo "CLONE_BASE_DIR=${CLONE_BASE_DIR}"
+  echo "AI_GATEWAY_CLONE_DIR=${AI_GATEWAY_CLONE_DIR}"
   echo "MAAS_REPO_URL=${MAAS_REPO_URL:-${MAAS_MANIFEST_REPO_URL:-}}"
   echo "MAAS_GIT_REF=${MAAS_GIT_REF:-${MAAS_MANIFEST_REF:-}}"
   echo "AI_GATEWAY_MAAS_MANIFEST_REF=${AI_GATEWAY_MAAS_MANIFEST_REF:-}"

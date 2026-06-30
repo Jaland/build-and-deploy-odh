@@ -1,5 +1,7 @@
-# Cloned upstream operator (script default)
+# Legacy local clone paths (default clones live under CLONE_BASE_DIR, /tmp)
 /opendatahub-operator/
+/ai-gateway-operator/
+/models-as-a-service/
 
 # CI summary written by scripts/build-and-push-odh-operator.sh
 /build-output.env

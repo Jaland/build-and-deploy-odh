@@ -13,16 +13,20 @@
 #
 # Tagging: UNIFIED_IMAGE_TAG applies to operator, bundle, catalog, and AI Gateway images.
 #
+# Clones default under CLONE_BASE_DIR (/tmp): ai-gateway-operator, opendatahub-operator,
+# models-as-a-service. No workflow input required in GitHub Actions.
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 AI_GATEWAY_IMAGE_REPO="${AI_GATEWAY_IMAGE_REPO:-${QUAY_AI_GATEWAY_REPO:-quay.io/maas/ai-gateway-operator}}"
+CLONE_BASE_DIR="${CLONE_BASE_DIR:-/tmp}"
 
 export AI_GATEWAY_IMAGE_REPO
+export CLONE_BASE_DIR
 export BUILD_OUTPUT_ENV="${ROOT}/ai-gateway-build-output.env"
-unset CLONE_DIR
 "${SCRIPT_DIR}/build-and-push-ai-gateway-operator.sh"
 
 set -a
