@@ -65,7 +65,10 @@
 #                             Upstream get_all_manifests.sh clones from github.com only.
 #   AI Gateway (module operator manifests + optional built image):
 #   AI_GATEWAY_REPO_URL     Clone URL for ai-gateway-operator (default upstream).
-#   AI_GATEWAY_GIT_REF      Branch/tag/commit for --aigateway= override (default main).
+#   AI_GATEWAY_GIT_REF      Branch, tag, commit, or branch@sha for --aigateway= (default main).
+#                             Branch/tag names are resolved to ref@<latest-sha> automatically
+#                             (git ls-remote at build time). Set AI_GATEWAY_MANIFEST_PIN_SHA=0 to
+#                             keep a floating branch name instead.
 #   AI_GATEWAY_IMAGE        Full image ref for the module operator. Patches
 #                             opt/manifests/aigateway/manifests/ai-gateway-operator/base/params.env
 #                             (used by the module handler kustomize replacements) and
@@ -82,8 +85,9 @@
 #   MAAS_CONTROLLER_IMAGE  Full container reference for the maas-controller operand, e.g. quay.io/myorg/maas-controller:v1.2.3
 #                        or quay.io/myorg/maas-controller@sha256:... (digest replaces newTag in kustomization).
 #                        Parsed as repository:tag when the last ':' is after the last '/' (supports registry:5000/repo:tag).
-#                        If there is no tag segment, newTag defaults to latest. Requires opt/manifests/maas/base/... layout.
+#                        If unset and UNIFIED_IMAGE_TAG is set, defaults to ${MAAS_CONTROLLER_IMAGE_REPO:-quay.io/maas/maas-controller}:${UNIFIED_IMAGE_TAG}.
 #   MAAS_API_IMAGE         Same for the maas-api operand (patches base/maas-api/core/kustomization.yaml).
+#                        If unset and UNIFIED_IMAGE_TAG is set, defaults to ${MAAS_API_IMAGE_REPO:-quay.io/maas/maas-api}:${UNIFIED_IMAGE_TAG}.
 #
 set -euo pipefail
 
@@ -118,6 +122,7 @@ prepare_operator_go_build "$(pwd)"
 maas_override=""
 MAAS_RESOLVED_REF=""
 aigateway_override=""
+AI_GATEWAY_MANIFEST_RESOLVED_REF=""
 AI_GATEWAY_IMAGE_EFFECTIVE=""
 dashboard_override=""
 MAAS_CONTROLLER_IMAGE_EFFECTIVE=""
@@ -153,9 +158,12 @@ apply_maas_manifest_repo_url() {
 build_aigateway_manifest_override() {
   local url="${AI_GATEWAY_REPO_URL:-https://github.com/opendatahub-io/ai-gateway-operator.git}"
   local ref="${AI_GATEWAY_GIT_REF:-main}"
+  local pin="${AI_GATEWAY_MANIFEST_PIN_SHA:-1}"
   if ! parse_github_repo_url "${url}"; then
     exit 1
   fi
+  ref="$(resolve_manifest_ref_pin "${GITHUB_ORG}" "${GITHUB_REPO}" "${ref}" "${pin}")"
+  echo "AI Gateway manifest ref: ${ref} (from ${AI_GATEWAY_GIT_REF:-main})" >&2
   build_component_override "${GITHUB_ORG}" "${GITHUB_REPO}" "${ref}" "config"
 }
 
@@ -164,7 +172,8 @@ apply_aigateway_line_to_get_all_manifests_file() {
   local f="get_all_manifests.sh"
   [[ -f "${f}" ]] || return 0
   echo "Rewriting ODH [\"aigateway\"] line in ${f} on disk to match --aigateway= (${override})..."
-  AIGATEWAY_OVERRIDE="$override" perl -i -pe 's/^(\s*\["aigateway"\]=")opendatahub-io:[^"]+/$1$ENV{AIGATEWAY_OVERRIDE}/' "${f}"
+  # ODH map only — do not replace red-hat-data-services: (RHOAI block on the line below).
+  AIGATEWAY_OVERRIDE="$override" perl -i -pe 's/^(\s*\["aigateway"\]=")(?!red-hat-data-services:)[^"]+/$1$ENV{AIGATEWAY_OVERRIDE}/' "${f}"
 }
 
 build_maas_manifest_override() {
@@ -318,6 +327,12 @@ apply_maas_component_image_overrides() {
   [[ -d "${maas_root}" ]] || return 0
   local ctrl="${MAAS_CONTROLLER_IMAGE:-}"
   local api="${MAAS_API_IMAGE:-}"
+  if [[ -z "${ctrl}" && -n "${UNIFIED_IMAGE_TAG:-}" ]]; then
+    ctrl="${MAAS_CONTROLLER_IMAGE_REPO:-quay.io/maas/maas-controller}:${UNIFIED_IMAGE_TAG}"
+  fi
+  if [[ -z "${api}" && -n "${UNIFIED_IMAGE_TAG:-}" ]]; then
+    api="${MAAS_API_IMAGE_REPO:-quay.io/maas/maas-api}:${UNIFIED_IMAGE_TAG}"
+  fi
   [[ -z "${ctrl}" && -z "${api}" ]] && return 0
   MAAS_CONTROLLER_IMAGE_EFFECTIVE="${ctrl}"
   MAAS_API_IMAGE_EFFECTIVE="${api}"
@@ -402,6 +417,8 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
   fi
   if [[ -n "${AI_GATEWAY_REPO_URL:-}" || -n "${AI_GATEWAY_GIT_REF:-}" || -n "${AI_GATEWAY_IMAGE:-}" ]]; then
     aigateway_override="$(build_aigateway_manifest_override)"
+    # org:repo:ref:path — ref is field 3 (may contain @)
+    IFS=: read -r _aigw_org _aigw_repo AI_GATEWAY_MANIFEST_RESOLVED_REF _aigw_path <<< "${aigateway_override}"
     echo "AI Gateway manifests: --aigateway=${aigateway_override}"
     apply_aigateway_line_to_get_all_manifests_file "${aigateway_override}"
   fi
@@ -438,6 +455,7 @@ if [[ "${SKIP_GET_MANIFESTS}" != "1" ]]; then
     echo "OPERATOR_GIT_REF=${OPERATOR_GIT_REF}"
     echo "AI_GATEWAY_REPO_URL=${AI_GATEWAY_REPO_URL:-}"
     echo "AI_GATEWAY_GIT_REF=${AI_GATEWAY_GIT_REF:-}"
+    echo "AI_GATEWAY_MANIFEST_RESOLVED_REF=${AI_GATEWAY_MANIFEST_RESOLVED_REF:-}"
     echo "AI_GATEWAY_IMAGE_EFFECTIVE=${AI_GATEWAY_IMAGE_EFFECTIVE:-}"
     echo "MAAS_REPO_URL=${MAAS_REPO_URL:-${MAAS_MANIFEST_REPO_URL:-}}"
     echo "MAAS_GIT_REF=${MAAS_GIT_REF:-${MAAS_MANIFEST_REF:-}}"
@@ -545,6 +563,7 @@ OPENSHIFT_CATALOG_SNIPPET="$(build_openshift_catalog_snippet "${CATALOG_IMG}" "$
   echo "OPERATOR_CLONE_DIR=${OPERATOR_CLONE_DIR}"
   echo "AI_GATEWAY_REPO_URL=${AI_GATEWAY_REPO_URL:-}"
   echo "AI_GATEWAY_GIT_REF=${AI_GATEWAY_GIT_REF:-}"
+  echo "AI_GATEWAY_MANIFEST_RESOLVED_REF=${AI_GATEWAY_MANIFEST_RESOLVED_REF:-}"
   echo "AI_GATEWAY_IMAGE=${AI_GATEWAY_IMAGE:-}"
   echo "AI_GATEWAY_IMAGE_EFFECTIVE=${AI_GATEWAY_IMAGE_EFFECTIVE:-}"
   echo "MAAS_REPO_URL=${MAAS_REPO_URL:-${MAAS_MANIFEST_REPO_URL:-}}"

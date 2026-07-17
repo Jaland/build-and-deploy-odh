@@ -26,6 +26,48 @@ resolve_branch_head_sha() {
   git ls-remote "https://github.com/${org}/${repo}.git" "refs/heads/${branch}" 2>/dev/null | awk '{print $1}'
 }
 
+# Resolve a branch or tag name to its current commit SHA (git ls-remote).
+resolve_ref_head_sha() {
+  local org="$1" repo="$2" ref="$3"
+  local sha
+  sha="$(resolve_branch_head_sha "${org}" "${repo}" "${ref}")"
+  if [[ -n "${sha}" ]]; then
+    echo "${sha}"
+    return 0
+  fi
+  sha="$(git ls-remote "https://github.com/${org}/${repo}.git" "refs/tags/${ref}" 2>/dev/null | awk '{print $1}')"
+  if [[ -n "${sha}" ]]; then
+    echo "${sha}"
+    return 0
+  fi
+  return 1
+}
+
+# Pin branch/tag refs to ref@sha for get_all_manifests.sh. Default: pin enabled.
+# Skips when ref is already ref@sha or a bare commit SHA.
+# Set pin_enabled=0 (or AI_GATEWAY_MANIFEST_PIN_SHA=0) to keep a floating branch name.
+resolve_manifest_ref_pin() {
+  local org="$1" repo="$2" ref="$3" pin_enabled="${4:-1}"
+  if [[ "${pin_enabled}" == "0" || "${pin_enabled}" == "false" ]]; then
+    echo "${ref}"
+    return 0
+  fi
+  if [[ "${ref}" == *@* ]]; then
+    echo "${ref}"
+    return 0
+  fi
+  if [[ "${ref}" =~ ^[a-f0-9]{7,40}$ ]]; then
+    echo "${ref}"
+    return 0
+  fi
+  local sha
+  if ! sha="$(resolve_ref_head_sha "${org}" "${repo}" "${ref}")"; then
+    echo "ERROR: could not resolve head SHA for https://github.com/${org}/${repo} ref ${ref}" >&2
+    return 1
+  fi
+  echo "${ref}@${sha}"
+}
+
 # Parent directory for all component git clones (default: /tmp).
 # Layout: ${CLONE_BASE_DIR}/ai-gateway-operator, .../opendatahub-operator, .../models-as-a-service
 # Override per-repo with AI_GATEWAY_CLONE_DIR, OPERATOR_CLONE_DIR, or MAAS_CLONE_DIR.
